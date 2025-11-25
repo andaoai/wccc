@@ -2,9 +2,26 @@
 # -*- coding: utf-8 -*-
 """
 测试GLM模型提示词功能 - 建筑行业数据转换
+从外部文件加载提示词
 """
 
 from glm_agent import GLMAgent
+
+
+def load_prompt_from_file(prompt_file: str = "prompt.md") -> str:
+    """从文件加载提示词"""
+    import os
+    prompt_path = os.path.join(os.path.dirname(__file__), prompt_file)
+
+    try:
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        print(f"❌ 提示词文件 {prompt_path} 不存在")
+        return ""
+    except Exception as e:
+        print(f"❌ 读取提示词文件失败: {e}")
+        return ""
 
 
 def test_construction_data_transformation():
@@ -12,43 +29,15 @@ def test_construction_data_transformation():
     print("🏗️ 测试建筑行业数据转换提示词")
     print("=" * 60)
 
-    # 建筑行业数据转换提示词
-    construction_prompt = """# AI JSON Data Transformation Prompt
+    # 从文件加载建筑行业数据转换提示词
+    construction_prompt = load_prompt_from_file("prompt.md")
 
-## 任务目标
-将提供的建筑行业人才供求文本数据，转化为标准的JSON数组格式。此JSON应便于直接或经过最少处理后导入PostgreSQL数据库。
+    if not construction_prompt:
+        print("❌ 无法加载提示词，测试终止")
+        return
 
-## 输出格式要求
-1.  **最终输出必须是且仅是**一个包含对象的JSON数组 (`[{}, {}, ...]`)。
-2.  **严格遵循下方提供的**JSON字段规范**。
-3.  **不要包含任何markdown代码块标记** (如 ```json 或 ```)，直接输出纯JSON。
-4.  不要包含任何解释性文字，只输出JSON数组。
-5.  价格单位默认为**万元/年** (`w`)，除非文本明确提到是**月**或**元**。
-6.  无法确定或不包含的信息，该字段应为 **null**。
-
-## JSON 字段规范 (PostgreSQL Column Mapping Reference)
-
-| JSON Key | Description (PostgreSQL Data Type Hint) |
-| :--- | :--- |
-| `deal_type` | **交易类型**: '出' (供)/'寻' (求)/'收' (求)。 (`TEXT`) |
-| `main_certificate` | **核心证书**: 证书级别和名称。 (`TEXT`) |
-| `aux_certificate` | **辅助证书**: 搭配的B证、其他专业、职称等。 (`TEXT`) |
-| `social_security` | **社保情况**: '三唯一', '社保唯一', '退休', '不转社保', '社保停了' 等。 (`TEXT`) |
-| `cooperation_req` | **配合要求**: '可出场', '配合出场刷脸', '不出场', '考勤' 等。 (`TEXT`) |
-| `target_location` | **目标区域**: 具体的省、市、区或要求（如'省内找', '丽水人'）。 (`TEXT`) |
-| `price_w` | **价格**: 转换为数值型。单位：**万元**。1000元/月应计算转换为年价（0.12）。 (`NUMERIC`) |
-| `price_cycle` | **价格周期**: 记录价格的实际周期，如 '年', '月'。 (`TEXT`) |
-| `notes` | **备注/其他信息**: 无法归类的细节、特殊时限、年龄要求等。 (`TEXT`) |
-
-## 价格转换规则
-* **W/年 (万元/年):** 直接使用数值。
-* **W/月 (万元/月):** 转换为年价：`价格 * 12`。
-* **元/月:** 转换为年价（万元）：`(价格 * 12) / 10000`。
-
-## 原始数据 (Data to Process)
----
-
-"""
+    print("📝 已从 prompt.md 文件加载提示词")
+    print()
 
     # 测试数据
     test_data = """寻二级建造师机电，浙江绍兴，价格2万，配合出场，社保不转
