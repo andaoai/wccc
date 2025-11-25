@@ -56,48 +56,96 @@ class WeChatAPI:
             data = event_data.get('data', {})
             msg_data = data.get('data', {})
 
-            from_type = msg_data.get('fromType', 0)
-            msg_type = msg_data.get('msgType', 0)
-            msg_content = msg_data.get('msg', '')
+            # 获取所有文档中定义的字段
+            from_type = msg_data.get('fromType', 0)          # 来源类型：1|私聊 2|群聊 3|公众号
+            msg_type = msg_data.get('msgType', 0)            # 消息类型：1|文本 3|图片 ...
+            msg_source = msg_data.get('msgSource', 0)        # 消息来源：0|别人发送 1|自己发送
+            msg_content = msg_data.get('msg', '')            # 消息内容
+            timestamp = msg_data.get('timeStamp', '')        # 时间戳
+
+            # 解析消息内容
             parsed_msg = self._parse_message_content(msg_content, msg_type)
 
             return {
                 'event': event_data.get('event'),
+                'timeStamp': timestamp,  # 添加时间戳
                 'wxid': data.get('wxid'),
                 'message': {
-                    'fromType': from_type,
-                    'msgType': msg_type,
-                    'fromWxid': msg_data.get('fromWxid'),
-                    'finalFromWxid': msg_data.get('finalFromWxid'),
-                    'atWxidList': msg_data.get('atWxidList', []),
-                    'membercount': msg_data.get('membercount', 0),
-                    'rawMsg': msg_content,
-                    'parsedMsg': parsed_msg,
-                    'msgId': msg_data.get('msgId')
+                    'fromType': from_type,                    # 来源类型
+                    'msgType': msg_type,                      # 消息类型
+                    'msgSource': msg_source,                  # 消息来源
+                    'fromWxid': msg_data.get('fromWxid'),     # 来源wxid
+                    'finalFromWxid': msg_data.get('finalFromWxid'),  # 群内发言人wxid
+                    'atWxidList': msg_data.get('atWxidList', []),    # @用户列表
+                    'silence': msg_data.get('silence', 0),     # 消息免打扰状态
+                    'membercount': msg_data.get('membercount', 0),   # 群成员数量
+                    'signature': msg_data.get('signature'),   # 消息签名
+                    'rawMsg': msg_content,                    # 原始消息内容
+                    'parsedMsg': parsed_msg,                  # 解析后的消息内容
+                    'msgId': msg_data.get('msgId'),           # 消息ID
+                    'sendId': msg_data.get('sendId')          # 发送请求ID
                 }
             }
         except Exception as e:
             return {'error': f'Parse failed: {str(e)}'}
 
     def _parse_message_content(self, msg: str, msg_type: int) -> Dict:
-        if msg_type == 1:
+        """解析消息内容，支持所有消息类型"""
+
+        if msg_type == 1:  # 文本消息
             return {'type': 'text', 'content': msg}
-        elif msg_type == 3 and msg.startswith('[pic='):
-            content = msg[5:-1]
-            parts = content.split(',')
-            path = parts[0]
-            is_decrypt = 0
-            for part in parts[1:]:
-                if part.startswith('isDecrypt='):
-                    is_decrypt = int(part.split('=')[1])
-            return {
-                'type': 'image',
-                'path': path,
-                'isDecrypt': is_decrypt,
-                'decryptStatus': '已解密' if is_decrypt == 1 else '未解密'
-            }
+
+        elif msg_type == 3:  # 图片消息
+            if msg.startswith('[pic='):
+                content = msg[5:-1]  # 去掉 [pic= 和 ]
+                parts = content.split(',')
+                path = parts[0]
+                is_decrypt = 0
+                for part in parts[1:]:
+                    if part.startswith('isDecrypt='):
+                        is_decrypt = int(part.split('=')[1])
+                return {
+                    'type': 'image',
+                    'path': path,
+                    'isDecrypt': is_decrypt,
+                    'decryptStatus': '已解密' if is_decrypt == 1 else '未解密'
+                }
+            else:
+                return {'type': 'image', 'content': msg}
+
+        elif msg_type == 34:  # 语音消息
+            return {'type': 'voice', 'content': msg}
+
+        elif msg_type == 42:  # 名片消息
+            return {'type': 'card', 'content': msg}
+
+        elif msg_type == 43:  # 视频消息
+            return {'type': 'video', 'content': msg}
+
+        elif msg_type == 47:  # 动态表情
+            return {'type': 'sticker', 'content': msg}
+
+        elif msg_type == 48:  # 地理位置
+            return {'type': 'location', 'content': msg}
+
+        elif msg_type == 49:  # 分享链接或附件
+            return {'type': 'share', 'content': msg}
+
+        elif msg_type == 2001:  # 红包
+            return {'type': 'redpacket', 'content': msg}
+
+        elif msg_type == 2002:  # 小程序
+            return {'type': 'miniprogram', 'content': msg}
+
+        elif msg_type == 2003:  # 群邀请
+            return {'type': 'group_invite', 'content': msg}
+
+        elif msg_type == 10000:  # 系统消息
+            return {'type': 'system', 'content': msg}
+
         else:
-            return {'type': 'unknown', 'content': msg}
+            # 未知消息类型，保留原始内容
+            return {'type': 'unknown', 'content': msg, 'msgType': msg_type}
 
     def start_websocket_listener(self, callback: Callable = None, ws_url: str = None):
         """
@@ -113,79 +161,90 @@ class WeChatAPI:
             ws_url = ws_base.replace(':7777', ':7778')
 
         if callback is None:
-            def default_callback(message_data):
-                msg = message_data.get('message', {})
-                parsed_msg = msg.get('parsedMsg', {})
-                msg_type = parsed_msg.get('type', 'unknown')
-
-                print(f"\n🔔 收到消息:")
-                print(f"👥 群聊: {msg.get('fromWxid')}")
-                print(f"🗣️ 发言: {msg.get('finalFromWxid')}")
-                print(f"📝 类型: {msg_type}")
-
-                if msg_type == 'text':
-                    print(f"💬 内容: {parsed_msg.get('content')}")
-                elif msg_type == 'image':
-                    print(f"🖼️ 图片: {parsed_msg.get('path')}")
-                else:
-                    print(f"📄 内容: {parsed_msg.get('content')}")
-
-                at_list = msg.get('atWxidList', [])
-                if at_list:
-                    print(f"📌 @用户: {', '.join(at_list)}")
-                print("-" * 40)
-
-            callback = default_callback
-
-        def websocket_client():
-            """WebSocket客户端线程"""
-            try:
-                import websocket
-                import queue
-
-                print(f"🔌 连接WebSocket: {ws_url}")
-
-                def on_message(ws, message):
-                    try:
-                        data = json.loads(message)
-                        if data.get('event') == 10008:  # 群聊消息
-                            parsed = self.parse_group_message(data)
-                            if 'error' not in parsed:
-                                callback(parsed)
-                    except Exception as e:
-                        print(f"❌ 消息处理错误: {e}")
-
-                def on_error(ws, error):
-                    print(f"❌ WebSocket错误: {error}")
-
-                def on_close(ws, close_status_code, close_msg):
-                    print(f"🔌 连接断开，5秒后重连...")
-                    time.sleep(5)
-                    websocket_client()
-
-                def on_open(ws):
-                    print(f"✅ WebSocket连接成功，开始监听消息...")
-
-                # 创建WebSocket连接
-                ws = websocket.WebSocketApp(
-                    ws_url,
-                    on_message=on_message,
-                    on_error=on_error,
-                    on_close=on_close,
-                    on_open=on_open
-                )
-
-                ws.run_forever()
-
-            except ImportError:
-                print("❌ 需要安装websocket-client库: pip install websocket-client")
-                return False
-            except Exception as e:
-                print(f"❌ WebSocket连接失败: {e}")
-                return False
+            callback = self.default_callback
 
         # 启动WebSocket监听线程
-        thread = threading.Thread(target=websocket_client, daemon=True)
+        thread = threading.Thread(target=self.websocket_client, args=(ws_url, callback), daemon=True)
         thread.start()
-
         return True
+
+    def default_callback(self, message_data):
+        """默认消息处理回调函数 - 添加断点调试支持"""
+        # 🔍 DEBUG BREAKPOINT - 在这里设置断点
+        import pdb; pdb.set_trace()  # 可以删掉这行，这是为了演示
+
+        msg = message_data.get('message', {})
+        parsed_msg = msg.get('parsedMsg', {})
+        msg_type = parsed_msg.get('type', 'unknown')
+
+        print(f"\n🔔 收到消息:")
+        print(f"👥 群聊: {msg.get('fromWxid')}")
+        print(f"🗣️ 发言: {msg.get('finalFromWxid')}")
+        print(f"📝 类型: {msg_type}")
+
+        if msg_type == 'text':
+            content = parsed_msg.get('content', '')
+            print(f"💬 内容: {content}")
+
+            # 🔍 DEBUG BREAKPOINT - 针对文本消息的断点
+            if 'hello' in content.lower() or '你好' in content:
+                print("🐛 DEBUG: 检测到问候消息，可以在这里设置断点")
+
+        elif msg_type == 'image':
+            print(f"🖼️ 图片: {parsed_msg.get('path')}")
+        else:
+            print(f"📄 内容: {parsed_msg.get('content')}")
+
+        at_list = msg.get('atWxidList', [])
+        if at_list:
+            print(f"📌 @用户: {', '.join(at_list)}")
+        print("-" * 40)
+
+    def on_message(self, callback, ws, message):
+        """WebSocket消息处理 - 调试断点可以在这里设置"""
+        try:
+            data = json.loads(message)
+            if data.get('event') == 10008:  # 群聊消息
+                parsed = self.parse_group_message(data)
+                if 'error' not in parsed:
+                    callback(parsed)
+        except Exception as e:
+            print(f"❌ 消息处理错误: {e}")
+
+    def on_error(self, ws, error):
+        """WebSocket错误处理 - 调试断点可以在这里设置"""
+        print(f"❌ WebSocket错误: {error}")
+
+    def on_close(self, ws_url, callback, ws, close_status_code, close_msg):
+        """WebSocket连接关闭处理 - 调试断点可以在这里设置"""
+        print(f"🔌 连接断开，5秒后重连...")
+        time.sleep(5)
+        self.websocket_client(ws_url, callback)
+
+    def on_open(self, ws):
+        """WebSocket连接成功处理 - 调试断点可以在这里设置"""
+        print(f"✅ WebSocket连接成功，开始监听消息...")
+
+    def websocket_client(self, ws_url: str, callback):
+        """WebSocket客户端主函数 - 调试断点可以在这里设置"""
+        try:
+            import websocket
+            import queue
+
+            print(f"🔌 连接WebSocket: {ws_url}")
+
+            # 创建WebSocket连接
+            ws = websocket.WebSocketApp(
+                ws_url,
+                on_message=lambda ws, message: self.on_message(callback, ws, message),
+                on_error=self.on_error,
+                on_close=lambda ws, code, msg: self.on_close(ws_url, callback, ws, code, msg),
+                on_open=self.on_open
+            )
+
+            ws.run_forever()
+
+        except ImportError:
+            print("❌ 需要安装websocket-client库: pip install websocket-client")
+        except Exception as e:
+            print(f"❌ WebSocket连接失败: {e}")
