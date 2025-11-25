@@ -17,6 +17,30 @@ class WeChatAPI:
             'Accept': 'application/json'
         })
 
+    def _clean_json_string(self, json_str: str) -> str:
+        """
+        清理JSON字符串中的控制字符和非法字符
+
+        Args:
+            json_str: 原始JSON字符串
+
+        Returns:
+            str: 清理后的JSON字符串
+        """
+        import re
+
+        # 移除控制字符（除了常用的空白字符）
+        # 保留：\t (9), \n (10), \r (13)
+        cleaned = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', json_str)
+
+        # 替换其他可能有问题的字符
+        cleaned = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]', '', cleaned)
+
+        # 特别处理一些可能出现在字符串中的控制字符序列
+        cleaned = re.sub(r'\\[b-f]', '', cleaned)  # 移除一些转义控制字符
+
+        return cleaned
+
     def _make_request(self, api_type: str, data: Dict = None, wxid: str = None) -> Dict:
         url = f"{self.base_url}/qianxun/httpapi"
         params = {}
@@ -30,15 +54,31 @@ class WeChatAPI:
         try:
             response = self.session.post(url, params=params, json=payload, timeout=30)
             response.raise_for_status()
-            return response.json()
+
+            # 尝试解析JSON，如果失败则清理控制字符后重试
+            try:
+                return response.json()
+            except json.JSONDecodeError as e:
+                # 尝试清理控制字符后重新解析
+                raw_response = response.text
+                try:
+                    # 移除或替换控制字符
+                    cleaned_response = self._clean_json_string(raw_response)
+                    return json.loads(cleaned_response)
+                except:
+                    # 如果还是失败，输出原始响应用于调试
+                    print(f"🐛 DEBUG: 原始响应文本: {raw_response}")
+                    return {
+                        'error': f'JSON解析失败: {str(e)}',
+                        'msg': 'JSON解析失败',
+                        'raw_response': raw_response
+                    }
         except requests.exceptions.ConnectionError:
             return {'error': 'Connection failed', 'msg': '连接失败'}
         except requests.exceptions.Timeout:
             return {'error': 'Request timeout', 'msg': '请求超时'}
         except requests.exceptions.RequestException as e:
             return {'error': str(e), 'msg': '请求失败'}
-        except json.JSONDecodeError:
-            return {'error': 'Invalid JSON response', 'msg': 'JSON解析失败'}
 
     def get_wechat_list(self) -> Dict:
         return self._make_request("getWeChatList")
@@ -47,6 +87,50 @@ class WeChatAPI:
         if not wxid:
             return {'error': 'wxid is required', 'msg': '微信ID不能为空'}
         return self._make_request("checkWeChat", {}, wxid=wxid)
+
+    def get_member_nick(self, group_wxid: str, member_wxid: str, bot_wxid: str = None) -> Dict:
+        """
+        获取群成员昵称
+
+        Args:
+            group_wxid: 群聊wxid
+            member_wxid: 群成员wxid
+            bot_wxid: 机器人wxid（可选，某些情况下需要）
+
+        Returns:
+            Dict: 包含成员昵称的响应
+        """
+        if not group_wxid or not member_wxid:
+            return {'error': 'group_wxid and member_wxid are required', 'msg': '群ID和成员ID不能为空'}
+
+        data = {
+            "wxid": group_wxid,
+            "objWxid": member_wxid
+        }
+
+        return self._make_request("getMemberNick", data, wxid=bot_wxid)
+
+    def query_group(self, group_wxid: str, bot_wxid: str = None, cache_type: str = "1") -> Dict:
+        """
+        查询群聊信息
+
+        Args:
+            group_wxid: 群聊wxid
+            bot_wxid: 机器人wxid（可选）
+            cache_type: 缓存类型，"1"=从缓存获取，"2"=从内存获取
+
+        Returns:
+            Dict: 包含群信息的响应
+        """
+        if not group_wxid:
+            return {'error': 'group_wxid is required', 'msg': '群ID不能为空'}
+
+        data = {
+            "wxid": group_wxid,
+            "type": cache_type
+        }
+
+        return self._make_request("queryGroup", data, wxid=bot_wxid)
 
     def parse_group_message(self, event_data: Dict) -> Dict:
         if event_data.get('event') != 10008:

@@ -15,6 +15,29 @@ class DebugWebSocketListener:
         self.api = api
         self.message_queue = queue.Queue()
         self.running = False
+        self.bot_wxid = None
+        self._get_bot_wxid()
+
+    def _get_bot_wxid(self):
+        """获取机器人wxid"""
+        try:
+            print("🔍 获取机器人wxid...")
+            list_result = self.api.get_wechat_list()
+            if list_result.get('code') == 200:
+                wechat_list = list_result.get('result', [])
+                if wechat_list:
+                    # 取第一个可用的微信实例作为机器人
+                    self.bot_wxid = wechat_list[0].get('wxid', '')
+                    if self.bot_wxid:
+                        print(f"🤖 机器人wxid: {self.bot_wxid}")
+                    else:
+                        print("❌ 无法获取机器人wxid")
+                else:
+                    print("❌ 未找到可用的微信实例")
+            else:
+                print(f"❌ 获取微信列表失败: {list_result.get('msg')}")
+        except Exception as e:
+            print(f"❌ 获取机器人wxid时出错: {e}")
 
     def start(self):
         """启动调试模式的WebSocket监听器"""
@@ -128,8 +151,15 @@ class DebugWebSocketListener:
         if from_type == 1:  # 私聊
             print(f"👤 好友: {msg.get('fromWxid')}")
         elif from_type == 2:  # 群聊
-            print(f"👥 群聊: {msg.get('fromWxid')}")
-            print(f"🗣️ 发言: {msg.get('finalFromWxid')}")
+            group_wxid = msg.get('fromWxid')
+            member_wxid = msg.get('finalFromWxid')
+
+            print(f"👥 群聊: {group_wxid}")
+            print(f"🗣️ 发言: {member_wxid}")
+
+            # 获取并显示群名称和成员昵称
+            self._show_group_and_member_info(group_wxid, member_wxid)
+
             print(f"👥 成员数: {msg.get('membercount', 0)}")
             print(f"🔕 免打扰: {'是' if msg.get('silence') == 1 else '否'}")
         elif from_type == 3:  # 公众号
@@ -248,6 +278,46 @@ class DebugWebSocketListener:
         """处理系统消息"""
         content = parsed_msg.get('content', '')
         print(f"⚙️ 系统消息: {content}")
+
+    def _show_group_and_member_info(self, group_wxid: str, member_wxid: str):
+        """
+        获取并显示群名称和成员昵称
+
+        Args:
+            group_wxid: 群聊wxid
+            member_wxid: 群成员wxid
+        """
+        if not self.bot_wxid:
+            print("❌ 机器人wxid未设置，无法获取群信息")
+            return
+
+        try:
+            # 获取群信息
+            group_result = self.api.query_group(group_wxid, self.bot_wxid)
+            if group_result.get('code') == 200:
+                group_info = group_result.get('result', {})
+                group_name = group_info.get('nick', '')  # 修正字段名：nick 而不是 nickname
+                if group_name:
+                    print(f"📛 群名称: {group_name}")
+            else:
+                print(f"❌ 获取群信息失败: {group_result.get('msg', '未知错误')}")
+                if 'error' in group_result:
+                    print(f"❌ 详细错误: {group_result.get('error')}")
+                if 'raw_response' in group_result:
+                    print(f"🐛 DEBUG: 原始响应: {group_result.get('raw_response')}")
+
+            # 获取群成员昵称
+            member_result = self.api.get_member_nick(group_wxid, member_wxid, self.bot_wxid)
+            if member_result.get('code') == 200:
+                member_info = member_result.get('result', {})
+                member_nick = member_info.get('groupNick', '')
+                if member_nick:
+                    print(f"👤 成员昵称: {member_nick}")
+            else:
+                print(f"❌ 获取成员昵称失败: {member_result.get('msg', '未知错误')}")
+
+        except Exception as e:
+            print(f"❌ 获取群信息或成员昵称时出错: {e}")
 
     def stop(self):
         """停止监听器"""
