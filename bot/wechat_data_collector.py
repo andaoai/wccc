@@ -319,9 +319,8 @@ class WeChatDataCollector:
 # 使用示例
 if __name__ == "__main__":
     # 导入回调处理器
-    from callback_handler import data_callback, create_monitored_callback, construction_cert_processor, MONITORED_GROUPS
+    from callback_handler import data_callback
 
-    # 方式1: 使用默认的建筑群聊回调
     print("🚀 启动微信数据采集器 - 建筑群聊监听模式")
     api = WeChatAPI(base_url="http://192.168.31.6:7777", safekey=None)
     collector = WeChatDataCollector(api, data_callback=data_callback, max_workers=3)
@@ -330,11 +329,3 @@ if __name__ == "__main__":
         collector.start()
     except KeyboardInterrupt:
         print("\n⚠️ 数据采集器已停止")
-
-    # 方式2: 使用自定义监听群列表的回调
-    # custom_groups = ["45692733938@chatroom", "23656456137@chatroom"]  # 只监听两个群
-    # custom_callback = create_monitored_callback(custom_groups, processing_time=5)
-    # collector = WeChatDataCollector(api, data_callback=custom_callback, max_workers=3)
-
-    # 方式3: 使用建筑资质专用处理器
-    # collector = WeChatDataCollector(api, data_callback=construction_cert_processor, max_workers=2)
