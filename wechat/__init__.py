@@ -6,7 +6,6 @@
 """
 
 from .WeChatAPI import WeChatAPI
-from .debug_websocket import DebugWebSocketListener
 
-__all__ = ['WeChatAPI', 'DebugWebSocketListener']
+__all__ = ['WeChatAPI']
 __version__ = '1.0.0'
