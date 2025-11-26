@@ -20,7 +20,6 @@ import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass, asdict
-from collections import defaultdict
 from wechat.WeChatAPI import WeChatAPI
 
 
@@ -55,7 +54,6 @@ class GroupInfo:
     group_name: str = ""
     member_count: int = 0
     owner_wxid: str = ""
-    update_time: float = 0
 
 
 @dataclass
@@ -65,7 +63,6 @@ class MemberInfo:
     group_wxid: str
     nickname: str = ""
     group_nick: str = ""
-    update_time: float = 0
 
 
 class WeChatDataCollector:
@@ -78,23 +75,12 @@ class WeChatDataCollector:
         self.running = False
         self.bot_wxid = None
 
-        # 缓存机制
-        self.group_cache = {}  # group_wxid -> GroupInfo
-        self.member_cache = defaultdict(dict)  # group_wxid -> member_wxid -> MemberInfo
-        self.cache_ttl = 300  # 缓存5分钟
-
-        # 异步API调用线程池
-        self.api_executor = threading.Thread(target=self._api_worker, daemon=True)
-        self.api_tasks = queue.Queue()
-
         # 统计信息
         self.stats = {
             'messages_received': 0,
             'messages_processed': 0,
             'api_calls': 0,
-            'api_errors': 0,
-            'cache_hits': 0,
-            'cache_misses': 0
+            'api_errors': 0
         }
 
         self._get_bot_wxid()
@@ -128,21 +114,23 @@ class WeChatDataCollector:
         ws_thread = threading.Thread(target=self._websocket_receiver, daemon=True)
         ws_thread.start()
 
-        # 启动API调用线程
-        self.api_executor.start()
-
         # 启动消息处理线程
         process_thread = threading.Thread(target=self._message_processor, daemon=True)
         process_thread.start()
 
-        # 主线程处理数据输出
-        self._data_output_handler()
+        # 保持主线程运行
+        try:
+            while self.running:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n⚠️ 接收到停止信号")
+        finally:
+            self.stop()
 
     def stop(self):
         """停止采集器"""
         self.running = False
         print("⚠️ 正在停止数据采集器...")
-        self._print_stats()
 
     def _websocket_receiver(self):
         """WebSocket接收线程"""
@@ -244,111 +232,48 @@ class WeChatDataCollector:
 
     def _process_message(self, wechat_msg: WeChatMessage):
         """处理单条消息"""
-        # 对于群聊消息，异步获取群信息和成员信息
-        if wechat_msg.from_type == 2:  # 群聊
-            group_wxid = wechat_msg.from_wxid
-            member_wxid = wechat_msg.final_from_wxid
-
-            # 检查缓存
-            current_time = time.time()
-
-            # 群信息缓存检查
-            if (group_wxid not in self.group_cache or
-                current_time - self.group_cache[group_wxid].update_time > self.cache_ttl):
-                self.api_tasks.put(('group', group_wxid, None))
-                self.stats['cache_misses'] += 1
-            else:
-                self.stats['cache_hits'] += 1
-
-            # 成员信息缓存检查
-            if (member_wxid not in self.member_cache[group_wxid] or
-                current_time - self.member_cache[group_wxid][member_wxid].update_time > self.cache_ttl):
-                self.api_tasks.put(('member', group_wxid, member_wxid))
-                self.stats['cache_misses'] += 1
-            else:
-                self.stats['cache_hits'] += 1
-
         # 输出结构化数据
         self._output_message(wechat_msg)
 
-    def _api_worker(self):
-        """API调用工作线程"""
-        print("🔧 API调用线程已启动")
-
-        while self.running:
-            try:
-                # 获取API任务
-                task = self.api_tasks.get(timeout=1.0)
-                task_type, group_wxid, member_wxid = task
-
-                current_time = time.time()
-
-                if task_type == 'group':
-                    # 获取群信息
-                    try:
-                        group_result = self.api.query_group(group_wxid, self.bot_wxid)
-                        self.stats['api_calls'] += 1
-
-                        if group_result.get('code') == 200:
-                            group_info = group_result.get('result', {})
-                            self.group_cache[group_wxid] = GroupInfo(
-                                group_wxid=group_wxid,
-                                group_name=group_info.get('nick', ''),
-                                member_count=group_info.get('memberCount', 0),
-                                owner_wxid=group_info.get('ownerWxid', ''),
-                                update_time=current_time
-                            )
-                        else:
-                            self.stats['api_errors'] += 1
-
-                    except Exception as e:
-                        print(f"❌ 获取群信息失败: {e}")
-                        self.stats['api_errors'] += 1
-
-                elif task_type == 'member':
-                    # 获取成员信息
-                    try:
-                        member_result = self.api.get_member_nick(group_wxid, member_wxid, self.bot_wxid)
-                        self.stats['api_calls'] += 1
-
-                        if member_result.get('code') == 200:
-                            member_info = member_result.get('result', {})
-                            self.member_cache[group_wxid][member_wxid] = MemberInfo(
-                                member_wxid=member_wxid,
-                                group_wxid=group_wxid,
-                                nickname=member_info.get('nick', ''),
-                                group_nick=member_info.get('groupNick', ''),
-                                update_time=current_time
-                            )
-                        else:
-                            self.stats['api_errors'] += 1
-
-                    except Exception as e:
-                        print(f"❌ 获取成员信息失败: {e}")
-                        self.stats['api_errors'] += 1
-
-                self.api_tasks.task_done()
-                time.sleep(0.1)  # 避免API调用过于频繁
-
-            except queue.Empty:
-                continue
-            except Exception as e:
-                print(f"❌ API工作线程错误: {e}")
-
-    def _output_message(self, wechat_msg: WeChatMessage):
-        """输出结构化消息数据"""
-        # 获取缓存的信息
+  
+    def _get_message_info(self, wechat_msg: WeChatMessage):
+        """获取消息的群信息和成员信息"""
         group_name = ""
         member_nick = ""
 
         if wechat_msg.from_type == 2:  # 群聊
-            group_info = self.group_cache.get(wechat_msg.from_wxid)
-            if group_info:
-                group_name = group_info.group_name
+            try:
+                # 获取群信息
+                group_result = self.api.query_group(wechat_msg.from_wxid, self.bot_wxid)
+                self.stats['api_calls'] += 1
+                if group_result.get('code') == 200:
+                    group_info = group_result.get('result', {})
+                    group_name = group_info.get('nick', '')
+                else:
+                    self.stats['api_errors'] += 1
+            except Exception as e:
+                print(f"❌ 获取群信息失败: {e}")
+                self.stats['api_errors'] += 1
 
-            member_info = self.member_cache.get(wechat_msg.from_wxid, {}).get(wechat_msg.final_from_wxid)
-            if member_info:
-                member_nick = member_info.group_nick
+            try:
+                # 获取成员信息
+                member_result = self.api.get_member_nick(wechat_msg.from_wxid, wechat_msg.final_from_wxid, self.bot_wxid)
+                self.stats['api_calls'] += 1
+                if member_result.get('code') == 200:
+                    member_info = member_result.get('result', {})
+                    member_nick = member_info.get('groupNick', '')
+                else:
+                    self.stats['api_errors'] += 1
+            except Exception as e:
+                print(f"❌ 获取成员信息失败: {e}")
+                self.stats['api_errors'] += 1
+
+        return group_name, member_nick
+
+    def _output_message(self, wechat_msg: WeChatMessage):
+        """输出结构化消息数据"""
+        # 获取群信息和成员信息
+        group_name, member_nick = self._get_message_info(wechat_msg)
 
         # 构建完整消息数据
         complete_data = {
@@ -364,9 +289,6 @@ class WeChatDataCollector:
             }
         }
 
-        # 输出到控制台
-        self._print_structured_message(complete_data)
-
         # 调用回调函数
         if self.data_callback:
             try:
@@ -374,76 +296,15 @@ class WeChatDataCollector:
             except Exception as e:
                 print(f"❌ 数据回调处理错误: {e}")
 
-    def _print_structured_message(self, data: Dict):
-        """打印结构化消息"""
-        msg = data['message']
-        group_info = data['group_info']
-
-        print(f"\n{'='*50}")
-        print(f"📨 新消息采集")
-        print(f"⏰ 时间: {msg['timestamp']}")
-        print(f"🆔 消息ID: {msg['msg_id']}")
-
-        # 消息类型
-        from_type_map = {1: "私聊", 2: "群聊", 3: "公众号"}
-        from_type_desc = from_type_map.get(msg['from_type'], f"未知({msg['from_type']})")
-        print(f"📝 类型: {from_type_desc}")
-
-        if msg['from_type'] == 2:  # 群聊
-            print(f"👥 群聊: {msg['from_wxid']}")
-            if group_info['group_name']:
-                print(f"📛 群名: {group_info['group_name']}")
-            print(f"🗣️ 发言: {msg['final_from_wxid']}")
-            if group_info['member_nick']:
-                print(f"👤 昵称: {group_info['member_nick']}")
-
-        # 消息内容
-        if msg['content']:
-            print(f"💬 内容: {msg['content'][:100]}{'...' if len(msg['content']) > 100 else ''}")
-
-        # 其他信息
-        if msg['at_wxid_list']:
-            print(f"📌 @用户: {', '.join(msg['at_wxid_list'])}")
-
-        print(f"📊 统计: 接收{self.stats['messages_received']} 处理{self.stats['messages_processed']} "
-              f"API{self.stats['api_calls']} 缓存命中{self.stats['cache_hits']}")
-        print(f"{'='*50}")
-
-    def _data_output_handler(self):
-        """主线程数据输出处理"""
-        print("📡 数据输出处理器已启动")
-
-        try:
-            while self.running:
-                time.sleep(1)  # 每秒更新一次统计信息
-                if self.stats['messages_received'] > 0 and self.stats['messages_received'] % 10 == 0:
-                    self._print_stats()
-        except KeyboardInterrupt:
-            print("\n⚠️ 接收到停止信号")
-        finally:
-            self.stop()
-
-    def _print_stats(self):
-        """打印统计信息"""
-        print(f"\n📊 采集统计:")
-        print(f"   消息接收: {self.stats['messages_received']}")
-        print(f"   消息处理: {self.stats['messages_processed']}")
-        print(f"   API调用: {self.stats['api_calls']}")
-        print(f"   API错误: {self.stats['api_errors']}")
-        print(f"   缓存命中: {self.stats['cache_hits']}")
-        print(f"   缓存未命中: {self.stats['cache_misses']}")
-        print(f"   缓存大小: 群{len(self.group_cache)} 成员{sum(len(members) for members in self.member_cache.values())}")
-        if self.stats['api_calls'] > 0:
-            success_rate = (self.stats['api_calls'] - self.stats['api_errors']) / self.stats['api_calls'] * 100
-            print(f"   API成功率: {success_rate:.1f}%")
-
+  
+    
 
 # 使用示例
 if __name__ == "__main__":
     def data_callback(data):
         """数据回调函数示例"""
         # 这里可以添加数据清洗、存储等逻辑
-        pass
+        print(f"收到消息: {data['message']['content']}")
 
     api = WeChatAPI(base_url="http://192.168.31.6:7777", safekey=None)
     collector = WeChatDataCollector(api, data_callback=data_callback)
