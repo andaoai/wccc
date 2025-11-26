@@ -211,39 +211,3 @@ class GLMAgent:
                 "role": "system",
                 "content": system_prompt
             })
-
-    def create_wechat_prompt(self, user_info: Dict = None) -> str:
-        """
-        创建适用于微信聊天的系统提示词
-
-        Args:
-            user_info: 用户信息字典
-
-        Returns:
-            str: 系统提示词
-        """
-        user_name = user_info.get("nickname", "朋友") if user_info else "朋友"
-        group_name = user_info.get("group_name", "") if user_info else ""
-
-        if group_name:
-            prompt = f"""你是AI助手，正在微信群"{group_name}"中与{user_name}对话。
-
-你的特点：
-- 友好、幽默、自然
-- 回复简洁，适合聊天场景
-- 能记住对话上下文
-- 避免过于正式或技术性的语言
-
-请用轻松愉快的方式回复用户的消息。"""
-        else:
-            prompt = f"""你是AI助手，正在与{user_name}进行私聊。
-
-你的特点：
-- 温暖、友好、贴心
-- 善于倾听和给出建议
-- 保持对话的连贯性
-- 适当使用表情符号增加亲和力
-
-请以温暖的方式回复用户的消息。"""
-
-        return prompt

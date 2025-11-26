@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-测试GLM模型提示词功能 - 建筑行业数据转换
-从外部文件加载提示词
+测试GLM模型微信消息处理功能 - 建筑行业数据转换
+从外部文件加载微信消息处理提示词
 """
 
 from glm_agent import GLMAgent
 
 
-def load_prompt_from_file(prompt_file: str = "prompt.md") -> str:
+def load_prompt_from_file(prompt_file: str = "wechat_msg_prompt.md") -> str:
     """从文件加载提示词"""
     import os
     prompt_path = os.path.join(os.path.dirname(__file__), prompt_file)
@@ -24,19 +24,19 @@ def load_prompt_from_file(prompt_file: str = "prompt.md") -> str:
         return ""
 
 
-def test_construction_data_transformation():
-    """测试建筑行业数据转换提示词"""
-    print("🏗️ 测试建筑行业数据转换提示词")
+def test_wechat_message_processing():
+    """测试微信消息建筑行业数据转换功能"""
+    print("🏗️ 测试微信消息建筑行业数据转换功能")
     print("=" * 60)
 
     # 从文件加载建筑行业数据转换提示词
-    construction_prompt = load_prompt_from_file("prompt.md")
+    construction_prompt = load_prompt_from_file("wechat_msg_prompt.md")
 
     if not construction_prompt:
         print("❌ 无法加载提示词，测试终止")
         return
 
-    print("📝 已从 prompt.md 文件加载提示词")
+    print("📝 已从 wechat_msg_prompt.md 文件加载提示词")
     print()
 
     # 测试数据
@@ -49,18 +49,16 @@ def test_construction_data_transformation():
         # 创建AI Agent
         agent = GLMAgent(api_key="9ea7ae31c7864b8a9e696ecdbd062820.KBM8KO07X9dgTjRi")
 
-        # 构建完整的提示词
-        full_prompt = construction_prompt + test_data
-
         print("📝 输入的测试数据:")
         print(test_data)
         print("\n" + "="*60)
         print("🤖 AI处理结果:")
 
-        # 调用AI进行处理
+        # 调用AI进行处理 - 使用系统提示词
         response = agent.chat(
-            full_prompt,
+            test_data,  # 用户消息：测试数据
             session_id="construction_test",
+            system_prompt=construction_prompt,  # 系统提示词：完整的提示词
             temperature=0.1  # 使用较低的温度以确保输出的准确性
         )
 
@@ -95,14 +93,13 @@ def test_construction_data_transformation():
                 # 显示解析结果摘要
                 for i, item in enumerate(parsed_json, 1):
                     print(f"📋 记录 {i}:")
-                    print(f"   交易类型: {item.get('deal_type')}")
-                    print(f"   核心证书: {item.get('main_certificate')}")
-                    print(f"   辅助证书: {item.get('aux_certificate')}")
-                    print(f"   目标区域: {item.get('target_location')}")
-                    print(f"   价格: {item.get('price_w')}万/{item.get('price_cycle')}")
-                    print(f"   配合要求: {item.get('cooperation_req')}")
+                    print(f"   交易类型: {item.get('type')}")
+                    print(f"   证书信息: {item.get('certificate')}")
                     print(f"   社保情况: {item.get('social_security')}")
-                    print(f"   备注: {item.get('notes')}")
+                    print(f"   地点: {item.get('location')}")
+                    print(f"   价格: {item.get('price')}")
+                    print(f"   其他信息: {item.get('other_info')}")
+                    print(f"   原始信息: {item.get('original_info')}")
                     print()
 
                 # 数据质量分析
@@ -115,7 +112,7 @@ def test_construction_data_transformation():
                         if value is None:
                             null_fields_count += 1
 
-                total_possible_fields = total_records * 9  # 9个字段
+                total_possible_fields = total_records * 7  # 7个字段
                 completeness = ((total_possible_fields - null_fields_count) / total_possible_fields) * 100
 
                 print(f"   总记录数: {total_records}")
@@ -137,11 +134,11 @@ def test_construction_data_transformation():
 
 def main():
     """主测试函数"""
-    print("🚀 GLM模型提示词测试")
+    print("🚀 GLM模型微信消息处理测试")
     print("🏗️ 建筑行业人才数据转换测试")
     print("=" * 60)
 
-    test_construction_data_transformation()
+    test_wechat_message_processing()
 
     print("\n✨ 测试完成！")
 

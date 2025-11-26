@@ -21,7 +21,7 @@
 
 ### 提取字段：
 1. **交易类型 (type)**：标记为 `"出"`(供应)、`"寻"`(需求)和`"收"`(求购)，都是一个意思。
-2. **证书信息 (certificate)**：完整保存证书名称和资质信息（字符串）
+2. **证书信息 (certificates)**：完整保存证书名称和资质信息（字符串）
 3. **社保情况 (social_security)**：标注社保状态，如 `"三唯一"`、`"唯一"`、`"项目唯一"`、`"不唯一"` 等
 4. **地点 (location)**：提取工作地点或区域要求，丽水，就变成浙江丽水，要是只有一个省名称，就填写一个省的名称也行
 5. **价格 (price)**：提取价格数字（整数类型）
@@ -40,7 +40,7 @@
 ```json
 [{
   "type": "",
-  "certificate": "",
+  "certificates": "",
   "social_security": "",
   "location": "",
   "price": 0,
@@ -55,7 +55,7 @@
 ```json
 [{
   "type": "出",
-  "certificate": "二级房建B",
+  "certificates": "二级房建B",
   "social_security": "三唯一",
   "location": "浙江省",
   "price": 500,
@@ -74,7 +74,7 @@
 [
     {
         "type": "寻",
-        "certificate": "二级房建B",
+        "certificates": "二级房建B",
         "social_security": "",
         "location": "浙江省丽水",
         "price": 0,
@@ -83,7 +83,7 @@
     },
     {
         "type": "寻",
-        "certificate": "二级市政",
+        "certificates": "二级市政",
         "social_security": "",
         "location": "浙江省",
         "price": 170000,
@@ -92,7 +92,7 @@
     },
     {
         "type": "寻",
-        "certificate": "二级房建+市政带B",
+        "certificates": "二级房建+市政带B",
         "social_security": "三唯一",
         "location": "浙江省台州",
         "price": 170000,
