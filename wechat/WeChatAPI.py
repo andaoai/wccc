@@ -132,6 +132,23 @@ class WeChatAPI:
 
         return self._make_request("queryGroup", data, wxid=bot_wxid)
 
+    def get_group_list(self, bot_wxid: str = None, cache_type: str = "1") -> Dict:
+        """
+        获取群聊列表
+
+        Args:
+            bot_wxid: 机器人wxid（可选）
+            cache_type: 获取方式，"1"=从缓存中获取，"2"=重新遍历二叉树并刷新缓存
+
+        Returns:
+            Dict: 包含群聊列表的响应
+        """
+        data = {
+            "type": cache_type
+        }
+
+        return self._make_request("getGroupList", data, wxid=bot_wxid)
+
     def parse_group_message(self, event_data: Dict) -> Dict:
         if event_data.get('event') != 10008:
             return {'error': 'Not a group message event'}
