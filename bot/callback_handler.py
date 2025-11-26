@@ -6,6 +6,7 @@
 """
 
 import time
+import json
 from typing import Dict, List
 from ai.glm_agent import GLMAgent
 
@@ -87,17 +88,29 @@ def data_callback(data: Dict):
     # 从文件加载建筑行业数据转换提示词
     construction_prompt = load_prompt_from_file("wechat_msg_prompt.md")
     # 创建AI Agent
-    agent = GLMAgent(api_key="9ea7ae31c7864b8a9e696ecdbd062820.KBM8KO07X9dgTjRi")
+    wechat_msg_agent = GLMAgent(api_key="9ea7ae31c7864b8a9e696ecdbd062820.KBM8KO07X9dgTjRi")
 
     # 调用AI进行处理 - 使用系统提示词
-    response = agent.chat(
+    response = wechat_msg_agent.chat(
         msg['content'],  # 用户消息：测试数据
         session_id="construction_test",
         system_prompt=construction_prompt,  # 系统提示词：完整的提示词
         temperature=0.1  # 使用较低的温度以确保输出的准确性
     )
-    print(response)
+    print(f"AI响应: {response}")
 
+    # 验证JSON格式
+    try:
+        json_data = json.loads(response)
+        print(f"✅ JSON格式验证通过，数据类型: {type(json_data)}")
+        if isinstance(json_data, list):
+            print(f"📊 解析到 {len(json_data)} 条数据")
+        for item in json_data:
+            print(f"- {item['certificates']}")
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON格式验证失败: {e}")
+    except Exception as e:
+        print(f"❌ 验证过程出错: {e}")
 
     print(f"完成处理消息: {msg['msg_id']}")
 
