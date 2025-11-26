@@ -7,6 +7,7 @@
 
 import time
 from typing import Dict, List
+from ai.glm_agent import GLMAgent
 
 # 定义需要监听的群聊列表（建筑相关群聊）
 MONITORED_GROUPS = [
@@ -15,9 +16,26 @@ MONITORED_GROUPS = [
     "23656456137@chatroom",  # 浙江建筑资质交流群
     "51961740237@chatroom",  # 建筑资质工程资质证书6
     "23488895708@chatroom",  # 宁波 赛冠 资质证书交流群（6）
-    "23700138315@chatroom"   # 资质交流群
+    "23700138315@chatroom",  # 资质交流群
+    "51844141003@chatroom"   # 建筑群-T-02283
 ]
 
+def load_prompt_from_file(prompt_file: str = "wechat_msg_prompt.md") -> str:
+    """从文件加载提示词"""
+    import os
+    # 从bot目录回到根目录，再进入ai目录
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    prompt_path = os.path.join(base_dir, "ai", prompt_file)
+
+    try:
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        print(f"❌ 提示词文件 {prompt_path} 不存在")
+        return ""
+    except Exception as e:
+        print(f"❌ 读取提示词文件失败: {e}")
+        return ""
 
 def data_callback(data: Dict):
     """
@@ -57,16 +75,29 @@ def data_callback(data: Dict):
     # 只处理群聊消息
     if msg['from_type'] != 2:  # 2表示群聊
         return
-
+    # 只处理消息类型为文本的消息（可根据需要调整）
+    if msg['msg_type'] != 1:  # 1表示文本消息
+        return
     # 过滤只监听指定群聊
     if msg['from_wxid'] not in MONITORED_GROUPS:
         return
 
     # 这里可以添加数据清洗、存储等逻辑
     print(f"开始处理消息: {data['group_info']['group_name']} - {msg['content'][:50]}...")
+    # 从文件加载建筑行业数据转换提示词
+    construction_prompt = load_prompt_from_file("wechat_msg_prompt.md")
+    # 创建AI Agent
+    agent = GLMAgent(api_key="9ea7ae31c7864b8a9e696ecdbd062820.KBM8KO07X9dgTjRi")
 
-    # 模拟耗时操作（10秒）
-    time.sleep(10)
+    # 调用AI进行处理 - 使用系统提示词
+    response = agent.chat(
+        msg['content'],  # 用户消息：测试数据
+        session_id="construction_test",
+        system_prompt=construction_prompt,  # 系统提示词：完整的提示词
+        temperature=0.1  # 使用较低的温度以确保输出的准确性
+    )
+    print(response)
+
 
     print(f"完成处理消息: {msg['msg_id']}")
 
