@@ -20,6 +20,7 @@ import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass, asdict
+from concurrent.futures import ThreadPoolExecutor
 from wechat.WeChatAPI import WeChatAPI
 
 
@@ -68,12 +69,15 @@ class MemberInfo:
 class WeChatDataCollector:
     """微信数据采集器"""
 
-    def __init__(self, api: WeChatAPI, data_callback: Optional[Callable] = None):
+    def __init__(self, api: WeChatAPI, data_callback: Optional[Callable] = None, max_workers: int = 5):
         self.api = api
         self.data_callback = data_callback
         self.message_queue = queue.Queue(maxsize=1000)
         self.running = False
         self.bot_wxid = None
+
+        # 异步回调处理线程池
+        self.callback_executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="callback")
 
         # 统计信息
         self.stats = {
@@ -131,6 +135,11 @@ class WeChatDataCollector:
         """停止采集器"""
         self.running = False
         print("⚠️ 正在停止数据采集器...")
+
+        # 关闭回调线程池
+        if hasattr(self, 'callback_executor'):
+            self.callback_executor.shutdown(wait=True)
+            print("✅ 回调线程池已关闭")
 
     def _websocket_receiver(self):
         """WebSocket接收线程"""
@@ -289,12 +298,19 @@ class WeChatDataCollector:
             }
         }
 
-        # 调用回调函数
+        # 异步调用回调函数
         if self.data_callback:
             try:
-                self.data_callback(complete_data)
+                self.callback_executor.submit(self._safe_callback, complete_data)
             except Exception as e:
-                print(f"❌ 数据回调处理错误: {e}")
+                print(f"❌ 提交回调任务失败: {e}")
+
+    def _safe_callback(self, data):
+        """安全执行回调函数"""
+        try:
+            self.data_callback(data)
+        except Exception as e:
+            print(f"❌ 数据回调处理错误: {e}")
 
   
     
@@ -302,12 +318,49 @@ class WeChatDataCollector:
 # 使用示例
 if __name__ == "__main__":
     def data_callback(data):
-        """数据回调函数示例"""
+        """
+        数据回调函数示例
+
+        data 参数结构:
+        {
+            'message': {
+                'msg_id': str,                    # 消息ID
+                'from_type': int,                 # 消息类型 1:私聊 2:群聊 3:公众号
+                'from_wxid': str,                 # 来源wxid
+                'final_from_wxid': str,           # 最终发送者wxid
+                'msg_type': int,                  # 消息类型
+                'msg_source': int,                # 消息来源 0:别人发送 1:自己发送
+                'content': str,                   # 消息内容
+                'parsed_content': dict,           # 解析后的消息内容
+                'timestamp': str,                 # 时间戳
+                'member_count': int,              # 群成员数量
+                'silence': int,                   # 是否静默
+                'at_wxid_list': list,             # @用户列表
+                'signature': str                  # 签名
+            },
+            'group_info': {
+                'group_name': str,                # 群名称
+                'member_nick': str                # 发言者群昵称
+            },
+            'collection_metadata': {
+                'collector_version': str,         # 采集器版本
+                'collection_time': str,           # 采集时间
+                'stats': dict                     # 统计信息
+            }
+        }
+        """
         # 这里可以添加数据清洗、存储等逻辑
-        print(f"收到消息: {data['message']['content']}")
+        import time
+        print(f"开始处理消息: {data['message']['content'][:50]}...")
+
+        # 模拟耗时操作（10秒）
+        time.sleep(10)
+
+        print(f"完成处理消息: {data['message']['msg_id']}")
 
     api = WeChatAPI(base_url="http://192.168.31.6:7777", safekey=None)
-    collector = WeChatDataCollector(api, data_callback=data_callback)
+    # 设置最大工作线程数为3，避免过多并发
+    collector = WeChatDataCollector(api, data_callback=data_callback, max_workers=3)
 
     try:
         collector.start()
