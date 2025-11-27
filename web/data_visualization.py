@@ -35,17 +35,74 @@ def init_session_state():
     if 'filtered_messages' not in st.session_state:
         st.session_state.filtered_messages = []
 
+def classify_transaction_type(type_str):
+    """分类交易类型为'收'或'出'"""
+    if not type_str:
+        return "其他"
+
+    type_str = type_str.strip()
+
+    # 收类型：包括收、接、招聘、寻
+    receive_types = ['收', '接', '招聘', '寻']
+    # 出类型：包括出
+    send_types = ['出']
+
+    if any(r_type in type_str for r_type in receive_types):
+        return "收"
+    elif any(s_type in type_str for s_type in send_types):
+        return "出"
+    else:
+        return "其他"
+
 def load_data():
     """加载数据库数据"""
     try:
         with db_manager.get_cursor(dict_cursor=True) as cursor:
+            # 查询收类型数据（包括收、接、招聘、寻）
             cursor.execute("""
-                SELECT * FROM wechat_messages
+                SELECT *, '收' as transaction_category
+                FROM wechat_messages
+                WHERE type LIKE '%收%'
+                   OR type LIKE '%接%'
+                   OR type LIKE '%招聘%'
+                   OR type LIKE '%寻%'
                 ORDER BY created_at DESC
-                LIMIT 10000
+                LIMIT 5000
             """)
-            messages = cursor.fetchall()
-            st.session_state.all_messages = [dict(msg) for msg in messages]
+            receive_messages = cursor.fetchall()
+
+            # 查询出类型数据（包括出）
+            cursor.execute("""
+                SELECT *, '出' as transaction_category
+                FROM wechat_messages
+                WHERE type LIKE '%出%'
+                ORDER BY created_at DESC
+                LIMIT 5000
+            """)
+            send_messages = cursor.fetchall()
+
+            # 查询其他类型数据
+            cursor.execute("""
+                SELECT *, '其他' as transaction_category
+                FROM wechat_messages
+                WHERE type NOT LIKE '%收%'
+                   AND type NOT LIKE '%接%'
+                   AND type NOT LIKE '%招聘%'
+                   AND type NOT LIKE '%寻%'
+                   AND type NOT LIKE '%出%'
+                ORDER BY created_at DESC
+                LIMIT 1000
+            """)
+            other_messages = cursor.fetchall()
+
+            # 合并所有数据
+            all_messages = receive_messages + send_messages + other_messages
+
+            # 添加交易分类字段
+            for msg in all_messages:
+                msg['transaction_category'] = classify_transaction_type(msg.get('type', ''))
+
+            st.session_state.all_messages = [dict(msg) for msg in all_messages]
             st.session_state.filtered_messages = st.session_state.all_messages.copy()
             st.session_state.data_loaded = True
             return True
@@ -55,8 +112,8 @@ def load_data():
 
 
 
-def display_data_table():
-    """显示数据表格"""
+def display_categorized_data():
+    """按收/出分类显示数据表格"""
     if not st.session_state.filtered_messages:
         st.info("暂无数据")
         return
@@ -64,43 +121,63 @@ def display_data_table():
     # 转换为DataFrame
     df = pd.DataFrame(st.session_state.filtered_messages)
 
-    # 选择要显示的列
-    display_columns = [
-        'created_at', 'type', 'certificates', 'location',
-        'price', 'group_name', 'member_nick', 'split_certificates'
-    ]
+    # 按交易分类分组
+    categories = ['收', '出', '其他']
 
-    # 确保列存在
-    available_columns = [col for col in display_columns if col in df.columns]
-    df_display = df[available_columns].copy()
+    for category in categories:
+        # 筛选当前分类的数据
+        category_data = df[df['transaction_category'] == category]
 
-    # 格式化时间戳
-    if 'created_at' in df_display.columns:
-        df_display['created_at'] = pd.to_datetime(df_display['created_at']).dt.strftime('%Y-%m-%d %H:%M:%S')
+        if len(category_data) == 0:
+            continue
 
-    # 格式化价格
-    if 'price' in df_display.columns:
-        df_display['price'] = df_display['price'].apply(lambda x: f"¥{x:,}" if x > 0 else "-")
+        # 显示分类标题和统计
+        st.subheader(f"📊 {category}类型数据 ({len(category_data)}条)")
 
-    # 重命名列标题
-    column_names = {
-        'created_at': '时间',
-        'type': '类型',
-        'certificates': '证书',
-        'location': '地区',
-        'price': '价格',
-        'group_name': '群组',
-        'member_nick': '成员',
-        'split_certificates': '拆分证书'
-    }
-    df_display = df_display.rename(columns=column_names)
+        # 选择要显示的列
+        display_columns = [
+            'created_at', 'type', 'certificates', 'location',
+            'price', 'group_name', 'member_nick', 'split_certificates'
+        ]
 
-    # 显示数据表格
-    st.dataframe(
-        df_display,
-        use_container_width=True,
-        hide_index=True
-    )
+        # 确保列存在
+        available_columns = [col for col in display_columns if col in category_data.columns]
+        df_display = category_data[available_columns].copy()
+
+        # 格式化时间戳
+        if 'created_at' in df_display.columns:
+            df_display['created_at'] = pd.to_datetime(df_display['created_at']).dt.strftime('%Y-%m-%d %H:%M:%S')
+
+        # 格式化价格
+        if 'price' in df_display.columns:
+            df_display['price'] = df_display['price'].apply(lambda x: f"¥{x:,}" if x > 0 else "-")
+
+        # 重命名列标题
+        column_names = {
+            'created_at': '时间',
+            'type': '类型',
+            'certificates': '证书',
+            'location': '地区',
+            'price': '价格',
+            'group_name': '群组',
+            'member_nick': '成员',
+            'split_certificates': '拆分证书'
+        }
+        df_display = df_display.rename(columns=column_names)
+
+        # 显示数据表格
+        st.dataframe(
+            df_display,
+            width='stretch',
+            hide_index=True
+        )
+
+        # 添加分隔线
+        st.markdown("---")
+
+def display_data_table():
+    """显示数据表格（保留原函数以防兼容性问题）"""
+    display_categorized_data()
 
 
 def sidebar_filters():
@@ -112,17 +189,31 @@ def sidebar_filters():
 
     df = pd.DataFrame(st.session_state.all_messages)
 
-    # 交易类型筛选
-    if 'type' in df.columns:
-        types = ['全部'] + list(df['type'].dropna().unique())
-        selected_type = st.sidebar.selectbox("交易类型", types)
-        if selected_type != '全部':
+    # 交易分类筛选（收/出/其他）
+    if 'transaction_category' in df.columns:
+        categories = ['全部'] + list(df['transaction_category'].dropna().unique())
+        selected_category = st.sidebar.selectbox("交易分类", categories)
+
+        if selected_category != '全部':
             st.session_state.filtered_messages = [
                 msg for msg in st.session_state.all_messages
-                if msg.get('type') == selected_type
+                if msg.get('transaction_category') == selected_category
             ]
         else:
             st.session_state.filtered_messages = st.session_state.all_messages.copy()
+
+    # 详细交易类型筛选
+    if 'type' in df.columns:
+        types = ['全部'] + sorted(list(df['type'].dropna().unique()))
+        selected_type = st.sidebar.selectbox("详细类型", types)
+
+        # 如果选择了具体类型，进一步筛选
+        if selected_type != '全部':
+            current_filtered = st.session_state.filtered_messages.copy()
+            st.session_state.filtered_messages = [
+                msg for msg in current_filtered
+                if msg.get('type') == selected_type
+            ]
 
 def main():
     """主函数"""

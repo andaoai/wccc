@@ -147,7 +147,7 @@ class WeChatDataCollector:
         try:
             import websocket
 
-            ws_url = "ws://192.168.31.6:7778"
+            ws_url = "ws://192.168.1.12:7778"
             print(f"🔌 连接WebSocket: {ws_url}")
 
             def on_message(ws, message):
@@ -322,7 +322,7 @@ if __name__ == "__main__":
     from bot.callback_handler import data_callback
 
     print("🚀 启动微信数据采集器 - 建筑群聊监听模式")
-    api = WeChatAPI(base_url="http://192.168.31.6:7777", safekey=None)
+    api = WeChatAPI(base_url="http://192.168.1.12:7777", safekey=None)
     collector = WeChatDataCollector(api, data_callback=data_callback, max_workers=3)
 
     try:

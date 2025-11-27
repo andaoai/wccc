@@ -66,7 +66,7 @@ The WeChat integration layer handles communication with the QianXun framework:
   - Handles JSON cleaning for malformed responses with control characters
   - Provides methods for WeChat list, status checking, group info, and member nicknames
   - Manages WebSocket connections for real-time message listening
-  - Default connection to `http://192.168.31.6:7777`
+  - Default connection to `http://192.168.1.12:7777`
 
 - **debug_websocket.py**: Debug-focused WebSocket listener
   - Runs message processing in main thread for easier debugging
@@ -129,7 +129,7 @@ The WeChat module and AI module work together for:
 ## External Dependencies
 
 The project requires:
-- **QianXun WeChat Framework** running on `http://192.168.31.6:7777` (HTTP) and `ws://192.168.31.6:7778` (WebSocket)
+- **QianXun WeChat Framework** running on `http://192.168.1.12:7777` (HTTP) and `ws://192.168.1.12:7778` (WebSocket)
 - **ZhipuAI API** access with valid API key for GLM-4.6 model
 - **PostgreSQL** database for data storage (optional but recommended)
 - Key Python packages: `zai-sdk`, `websocket-client`, `requests`, `sentence-transformers`, `torch`, `pymilvus`
@@ -147,7 +147,7 @@ The project requires:
 ```python
 from wechat.WeChatAPI import WeChatAPI
 
-api = WeChatAPI(base_url="http://192.168.31.6:7777")
+api = WeChatAPI(base_url="http://192.168.1.12:7777")
 wechat_list = api.get_wechat_list()
 group_info = api.query_group(group_wxid, bot_wxid)
 member_nick = api.get_member_nick(group_wxid, member_wxid, bot_wxid)

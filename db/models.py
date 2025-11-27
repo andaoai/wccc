@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class WeChatMessageData:
     """微信消息数据结构规范"""
-    type: str = ""                    # 交易类型（如：收、寻证、出场等）
+    type: str = ""                    # 交易类型（如：收、接、招聘、寻、出等）
     certificates: str = ""            # 原始证书信息（未拆分）
     social_security: str = ""         # 社保要求（如：唯一社保、转社保、无要求等）
     location: str = ""               # 地区信息（如：浙江省、宁波市等）
@@ -28,7 +28,9 @@ class WeChatMessageData:
     group_name: str = ""             # 群名称
     member_nick: str = ""            # 群成员昵称
     group_wxid: str = ""             # 微信群ID
-    member_wxid: str = ""            # 发送者微信wxid
+    member_wxid: str = ""            # 群成员微信ID
+    bot_wxid: str = ""               # 机器人微信ID
+    msg_time: str = ""               # 消息时间戳
     msg_id: str = ""                 # 消息ID
     timestamp: str = ""              # 消息时间戳
 

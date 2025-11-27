@@ -56,7 +56,7 @@ class DebugWebSocketListener:
         try:
             import websocket
 
-            ws_url = "ws://192.168.31.6:7778"
+            ws_url = "ws://192.168.1.12:7778"
             print(f"🔌 连接WebSocket: {ws_url}")
 
             def on_message(ws, message):
@@ -326,7 +326,7 @@ class DebugWebSocketListener:
 
 if __name__ == "__main__":
     # 使用调试版本
-    api = WeChatAPI(base_url="http://192.168.31.6:7777", safekey=None)
+    api = WeChatAPI(base_url="http://192.168.1.12:7777", safekey=None)
 
     print("🚀 微信API调试工具")
 

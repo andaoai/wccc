@@ -10,7 +10,7 @@ def test_get_group_list():
     """测试获取群聊列表功能"""
 
     # 初始化API (使用与debug_websocket.py相同的连接地址)
-    api = WeChatAPI(base_url="http://192.168.31.6:7777", safekey=None)
+    api = WeChatAPI(base_url="http://192.168.1.12:7777", safekey=None)
 
     print("=" * 50)
     print("🔍 测试获取群聊列表功能")
@@ -92,7 +92,7 @@ def test_error_handling():
     print("🧪 测试错误处理")
     print("=" * 50)
 
-    api = WeChatAPI(base_url="http://192.168.31.6:7777", safekey=None)
+    api = WeChatAPI(base_url="http://192.168.1.12:7777", safekey=None)
 
     # 测试无效的cache_type
     print("\n❌ 测试无效的cache_type...")
