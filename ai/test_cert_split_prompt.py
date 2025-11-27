@@ -40,7 +40,7 @@ def test_certificate_splitting():
     print()
 
     # 测试数据 - 单行输入，模拟实际使用场景
-    test_line = "一级土建造价初始+二级市政+中工+B"
+    test_line = "一级公路+水利+二级市政+中工带B"
 
     try:
         # 创建AI Agent
@@ -66,6 +66,8 @@ def test_certificate_splitting():
         # 移除 ```python 和 ``` 标记
         if cleaned_response.startswith('```python'):
             cleaned_response = cleaned_response[9:]
+        if cleaned_response.startswith('```json'):
+            cleaned_response = cleaned_response[7:]
         if cleaned_response.startswith('```'):
             cleaned_response = cleaned_response[3:]
         if cleaned_response.endswith('```'):
