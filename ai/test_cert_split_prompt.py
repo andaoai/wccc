@@ -40,7 +40,7 @@ def test_certificate_splitting():
     print()
 
     # 测试数据 - 单行输入，模拟实际使用场景
-    test_line = "一级公路+水利+二级市政+中工带B"
+    test_line = "二级市政+公路+水利3B"
 
     try:
         # 创建AI Agent

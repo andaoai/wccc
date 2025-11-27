@@ -10,6 +10,55 @@ import json
 from typing import Dict, List
 from ai.glm_agent import GLMAgent
 
+def clean_ai_response(response: str) -> str:
+    """清洗AI响应数据，移除markdown标记等"""
+    if not isinstance(response, str):
+        return str(response) if response else ""
+
+    cleaned = response.strip()
+
+    # 移除代码块标记
+    if cleaned.startswith('```python'):
+        cleaned = cleaned[9:]
+    if cleaned.startswith('```json'):
+        cleaned = cleaned[7:]
+    if cleaned.startswith('```'):
+        cleaned = cleaned[3:]
+    if cleaned.endswith('```'):
+        cleaned = cleaned[:-3]
+
+    return cleaned.strip()
+
+def parse_json_response(response: str) -> dict:
+    """解析JSON格式的AI响应"""
+    try:
+        cleaned_json = clean_ai_response(response)
+        return json.loads(cleaned_json)
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON解析失败: {e}")
+        return {}
+    except Exception as e:
+        print(f"❌ 处理JSON响应时发生错误: {e}")
+        return {}
+
+def parse_list_response(response: str) -> list:
+    """解析列表格式的AI响应"""
+    try:
+        import ast
+        cleaned_list = clean_ai_response(response)
+        return ast.literal_eval(cleaned_list)
+    except (ValueError, SyntaxError) as e:
+        print(f"❌ 列表解析失败: {e}")
+        # 备用方案：按逗号分割
+        try:
+            cleaned = clean_ai_response(response)
+            return [cert.strip() for cert in cleaned.strip('[]').split(',') if cert.strip()]
+        except:
+            return []
+    except Exception as e:
+        print(f"❌ 处理列表响应时发生错误: {e}")
+        return []
+
 # 定义需要监听的群聊列表（建筑相关群聊）
 MONITORED_GROUPS = [
     "47606308433@chatroom",  # 机电工程交流
@@ -86,31 +135,56 @@ def data_callback(data: Dict):
     # 这里可以添加数据清洗、存储等逻辑
     print(f"开始处理消息: {data['group_info']['group_name']} - {msg['content'][:50]}...")
     # 从文件加载建筑行业数据转换提示词
-    construction_prompt = load_prompt_from_file("wechat_msg_prompt.md")
-    # 创建AI Agent
-    wechat_msg_agent = GLMAgent(api_key="9ea7ae31c7864b8a9e696ecdbd062820.KBM8KO07X9dgTjRi")
+    wechat_msg_construction_prompt = load_prompt_from_file("wechat_msg_prompt.md")
+    cert_split_construction_prompt = load_prompt_from_file("cert_split_prompt.md")
 
+    # 文本结构化 AI Agent
+    wechat_msg_agent = GLMAgent(api_key="9ea7ae31c7864b8a9e696ecdbd062820.KBM8KO07X9dgTjRi")
+    # 证书拆分 AI Agent
+    cert_split_agent = GLMAgent(api_key="9ea7ae31c7864b8a9e696ecdbd062820.KBM8KO07X9dgTjRi")
     # 调用AI进行处理 - 使用系统提示词
     response = wechat_msg_agent.chat(
         msg['content'],  # 用户消息：测试数据
-        session_id="construction_test",
-        system_prompt=construction_prompt,  # 系统提示词：完整的提示词
+        system_prompt=wechat_msg_construction_prompt,  # 系统提示词：完整的提示词
         temperature=0.1  # 使用较低的温度以确保输出的准确性
     )
-    print(f"AI响应: {response}")
+    print(f"📝 微信消息AI响应: {response}")
 
-    # 验证JSON格式
-    try:
-        json_data = json.loads(response)
-        print(f"✅ JSON格式验证通过，数据类型: {type(json_data)}")
-        if isinstance(json_data, list):
-            print(f"📊 解析到 {len(json_data)} 条数据")
-        for item in json_data:
-            print(f"- {item['certificates']}")
-    except json.JSONDecodeError as e:
-        print(f"❌ JSON格式验证失败: {e}")
-    except Exception as e:
-        print(f"❌ 验证过程出错: {e}")
+    # 使用数据清洗函数解析JSON响应
+    json_data = parse_json_response(response)
+    if not json_data:
+        print(f"❌ JSON解析失败，跳过证书拆分")
+        return
+
+    print(f"✅ JSON格式验证通过，数据类型: {type(json_data)}")
+    if isinstance(json_data, list):
+        print(f"📊 解析到 {len(json_data)} 条数据")
+
+    # 处理每条数据的证书信息
+    for item in json_data:
+        if 'certificates' not in item:
+            continue
+
+        print(f"🔍 处理证书: {item['certificates']}")
+
+        # 调用证书拆分AI
+        cert_response = cert_split_agent.chat(
+            item['certificates'],  # 证书str
+            system_prompt=cert_split_construction_prompt,  # 系统提示词：完整的提示词
+            temperature=0.1  # 使用较低的温度以确保输出的准确性
+        )
+        print(f"📋 证书拆分AI响应: {cert_response}")
+
+        # 使用数据清洗函数解析证书列表
+        cert_list = parse_list_response(cert_response)
+        if cert_list:
+            print(f"✅ 转换后的证书列表: {cert_list}")
+            print(f"📊 证书类型: {type(cert_list)}, 数量: {len(cert_list)}")
+
+            # 这里可以进一步处理证书列表，比如存入数据库等
+            # process_certificates(cert_list)
+        else:
+            print(f"❌ 证书列表解析失败")
 
     print(f"完成处理消息: {msg['msg_id']}")
 
