@@ -22,7 +22,7 @@ from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass, asdict
 from concurrent.futures import ThreadPoolExecutor
 from wechat.WeChatAPI import WeChatAPI
-from callback_handler import data_callback
+from bot.callback_handler import data_callback
 
 
 @dataclass
@@ -319,7 +319,7 @@ class WeChatDataCollector:
 # 使用示例
 if __name__ == "__main__":
     # 导入回调处理器
-    from callback_handler import data_callback
+    from bot.callback_handler import data_callback
 
     print("🚀 启动微信数据采集器 - 建筑群聊监听模式")
     api = WeChatAPI(base_url="http://192.168.31.6:7777", safekey=None)

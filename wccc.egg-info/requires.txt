@@ -1,0 +1,13 @@
+numpy>=1.24.4
+psycopg2-binary>=2.9.10
+pymilvus[milvus-lite]>=2.6.3
+requests>=2.28.0
+sentence-transformers>=3.2.1
+torch>=2.5.1
+websocket-client>=1.5.0
+zai-sdk>=0.0.4.2
+
+[dev]
+pytest>=7.0.0
+black>=22.0.0
+flake8>=5.0.0

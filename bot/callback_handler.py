@@ -7,70 +7,13 @@
 
 import time
 import json
-from typing import Dict, List, Optional
-from dataclasses import dataclass
+import sys
+import os
+from typing import Dict, List
 from ai.glm_agent import GLMAgent
-
-
-@dataclass
-class WeChatMessageData:
-    """微信消息数据结构规范"""
-    type: str = ""                    # 交易类型（如：招聘、寻证、出场等）
-    certificates: str = ""            # 原始证书信息（未拆分）
-    social_security: str = ""         # 社保要求（如：唯一社保、转社保、无要求等）
-    location: str = ""               # 地区信息（如：浙江省、宁波市等）
-    price: int = 0                   # 价格信息
-    other_info: str = ""             # 其他信息
-    original_info: str = ""          # 原始消息内容
-    split_certificates: Optional[List[str]] = None  # 证书拆分后的列表（前期可以为空）
-    # 微信消息元数据
-    group_name: str = ""             # 群名称
-    member_nick: str = ""            # 群成员昵称
-    group_wxid: str = ""             # 微信群ID
-    member_wxid: str = ""            # 发送者微信wxid
-    msg_id: str = ""                 # 消息ID
-    timestamp: str = ""              # 消息时间戳
-    
-    def to_dict(self) -> Dict:
-        """转换为字典格式"""
-        return {
-            "type": self.type,
-            "certificates": self.certificates,
-            "social_security": self.social_security,
-            "location": self.location,
-            "price": self.price,
-            "other_info": self.other_info,
-            "original_info": self.original_info,
-            "split_certificates": self.split_certificates,
-            # 微信消息元数据
-            "group_name": self.group_name,
-            "member_nick": self.member_nick,
-            "group_wxid": self.group_wxid,
-            "member_wxid": self.member_wxid,
-            "msg_id": self.msg_id,
-            "timestamp": self.timestamp
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> 'WeChatMessageData':
-        """从字典创建dataclass实例"""
-        return cls(
-            type=data.get("type", ""),
-            certificates=data.get("certificates", ""),
-            social_security=data.get("social_security", ""),
-            location=data.get("location", ""),
-            price=data.get("price", 0),
-            other_info=data.get("other_info", ""),
-            original_info=data.get("original_info", ""),
-            split_certificates=data.get("split_certificates"),
-            # 微信消息元数据
-            group_name=data.get("group_name", ""),
-            member_nick=data.get("member_nick", ""),
-            group_wxid=data.get("group_wxid", ""),
-            member_wxid=data.get("member_wxid", ""),
-            msg_id=data.get("msg_id", ""),
-            timestamp=data.get("timestamp", "")
-        )
+from db import wechat_message_dao, init_database
+from db import WeChatMessageData
+from .config import MONITORED_GROUPS
 
 
 def json_to_wechat_message_data_list(json_data: List[Dict], callback_data: Dict = None) -> List[WeChatMessageData]:
@@ -180,16 +123,21 @@ def parse_list_response(response: str) -> list:
         print(f"❌ 处理列表响应时发生错误: {e}")
         return []
 
-# 定义需要监听的群聊列表（建筑相关群聊）
-MONITORED_GROUPS = [
-    "47606308433@chatroom",  # 机电工程交流
-    "45692733938@chatroom",  # 建筑资质群3
-    "23656456137@chatroom",  # 浙江建筑资质交流群
-    "51961740237@chatroom",  # 建筑资质工程资质证书6
-    "23488895708@chatroom",  # 宁波 赛冠 资质证书交流群（6）
-    "23700138315@chatroom",  # 资质交流群
-    "51844141003@chatroom"   # 建筑群-T-02283
-]
+# MONITORED_GROUPS已移至config.py
+
+def init_wechat_database():
+    """初始化微信消息数据库"""
+    try:
+        print("🗄️ 初始化PostgreSQL数据库...")
+        init_database()
+        print("✅ 数据库初始化完成")
+        return True
+    except Exception as e:
+        print(f"❌ 数据库初始化失败: {e}")
+        return False
+
+# 在模块加载时初始化数据库
+_DB_INITIALIZED = init_wechat_database()
 
 def load_prompt_from_file(prompt_file: str = "wechat_msg_prompt.md") -> str:
     """从文件加载提示词"""
@@ -321,8 +269,12 @@ def data_callback(data: Dict):
             wechat_data.split_certificates = cert_list
             print(f"💾 已保存拆分后的证书列表到dataclass对象")
 
-            # 这里可以进一步处理证书列表，比如存入数据库等
-            # process_certificates(cert_list, wechat_data)
+            # 存储到PostgreSQL数据库
+            message_id = wechat_message_dao.insert_message(wechat_data)
+            if message_id:
+                print(f"🗄️ 已保存消息到数据库，ID: {message_id}")
+            else:
+                print(f"❌ 保存到数据库失败")
         else:
             print(f"❌ 证书列表解析失败")
 
