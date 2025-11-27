@@ -22,7 +22,8 @@ class WeChatMessageData:
     price: int = 0                   # 价格信息
     other_info: str = ""             # 其他信息
     original_info: str = ""          # 原始消息内容
-
+    split_certificates: Optional[List[str]] = None  # 证书拆分后的列表（前期可以为空）
+    
     def to_dict(self) -> Dict:
         """转换为字典格式"""
         return {
@@ -32,7 +33,8 @@ class WeChatMessageData:
             "location": self.location,
             "price": self.price,
             "other_info": self.other_info,
-            "original_info": self.original_info
+            "original_info": self.original_info,
+            "split_certificates": self.split_certificates
         }
 
     @classmethod
@@ -45,7 +47,8 @@ class WeChatMessageData:
             location=data.get("location", ""),
             price=data.get("price", 0),
             other_info=data.get("other_info", ""),
-            original_info=data.get("original_info", "")
+            original_info=data.get("original_info", ""),
+            split_certificates=data.get("split_certificates")
         )
 
 
@@ -253,9 +256,9 @@ def data_callback(data: Dict):
             print(f"✅ 转换后的证书列表: {cert_list}")
             print(f"📊 证书类型: {type(cert_list)}, 数量: {len(cert_list)}")
 
-            # 更新dataclass对象的证书信息（可选）
-            # 这里可以添加拆分后的证书列表到wechat_data对象中
-            # 例如：wechat_data.split_certificates = cert_list
+            # 更新dataclass对象的证书信息，将拆分后的证书列表存储到对象中
+            wechat_data.split_certificates = cert_list
+            print(f"💾 已保存拆分后的证书列表到dataclass对象")
 
             # 这里可以进一步处理证书列表，比如存入数据库等
             # process_certificates(cert_list, wechat_data)
