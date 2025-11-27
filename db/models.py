@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class WeChatMessageData:
     """微信消息数据结构规范"""
-    type: str = ""                    # 交易类型（如：招聘、寻证、出场等）
+    type: str = ""                    # 交易类型（如：收、寻证、出场等）
     certificates: str = ""            # 原始证书信息（未拆分）
     social_security: str = ""         # 社保要求（如：唯一社保、转社保、无要求等）
     location: str = ""               # 地区信息（如：浙江省、宁波市等）

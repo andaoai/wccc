@@ -41,13 +41,13 @@ def test_insert_and_retrieve_message():
 
     # 创建测试数据
     test_message = WeChatMessageData(
-        type="招聘",
+        type="收",
         certificates="一级建造师,二级建造师",
         social_security="唯一社保",
         location="浙江省宁波市",
         price=8000,
         other_info="急招，待遇优厚",
-        original_info="招聘一级建造师，要求唯一社保，地点宁波，月薪8000",
+        original_info="收一级建造师，要求唯一社保，地点宁波，月薪8000",
         split_certificates=["一级建造师", "二级建造师"],
         group_name="建筑资质交流群",
         member_nick="张工",
