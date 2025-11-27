@@ -150,7 +150,7 @@ def display_categorized_data():
 
         # 格式化价格
         if 'price' in df_display.columns:
-            df_display['price'] = df_display['price'].apply(lambda x: f"¥{x:,}" if x > 0 else "-")
+            df_display['price'] = df_display['price'].apply(lambda x: f"¥{x:,}" if x is not None and x > 0 else "-")
 
         # 重命名列标题
         column_names = {
