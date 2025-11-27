@@ -23,6 +23,13 @@ class WeChatMessageData:
     other_info: str = ""             # 其他信息
     original_info: str = ""          # 原始消息内容
     split_certificates: Optional[List[str]] = None  # 证书拆分后的列表（前期可以为空）
+    # 微信消息元数据
+    group_name: str = ""             # 群名称
+    member_nick: str = ""            # 群成员昵称
+    group_wxid: str = ""             # 微信群ID
+    member_wxid: str = ""            # 发送者微信wxid
+    msg_id: str = ""                 # 消息ID
+    timestamp: str = ""              # 消息时间戳
     
     def to_dict(self) -> Dict:
         """转换为字典格式"""
@@ -34,7 +41,14 @@ class WeChatMessageData:
             "price": self.price,
             "other_info": self.other_info,
             "original_info": self.original_info,
-            "split_certificates": self.split_certificates
+            "split_certificates": self.split_certificates,
+            # 微信消息元数据
+            "group_name": self.group_name,
+            "member_nick": self.member_nick,
+            "group_wxid": self.group_wxid,
+            "member_wxid": self.member_wxid,
+            "msg_id": self.msg_id,
+            "timestamp": self.timestamp
         }
 
     @classmethod
@@ -48,16 +62,24 @@ class WeChatMessageData:
             price=data.get("price", 0),
             other_info=data.get("other_info", ""),
             original_info=data.get("original_info", ""),
-            split_certificates=data.get("split_certificates")
+            split_certificates=data.get("split_certificates"),
+            # 微信消息元数据
+            group_name=data.get("group_name", ""),
+            member_nick=data.get("member_nick", ""),
+            group_wxid=data.get("group_wxid", ""),
+            member_wxid=data.get("member_wxid", ""),
+            msg_id=data.get("msg_id", ""),
+            timestamp=data.get("timestamp", "")
         )
 
 
-def json_to_wechat_message_data_list(json_data: List[Dict]) -> List[WeChatMessageData]:
+def json_to_wechat_message_data_list(json_data: List[Dict], callback_data: Dict = None) -> List[WeChatMessageData]:
     """
     将JSON数据转换为WeChatMessageData对象列表
 
     Args:
         json_data: AI返回的JSON数据列表
+        callback_data: 回调数据，包含微信消息元数据
 
     Returns:
         List[WeChatMessageData]: 转换后的dataclass对象列表
@@ -66,10 +88,44 @@ def json_to_wechat_message_data_list(json_data: List[Dict]) -> List[WeChatMessag
         return []
 
     result = []
+
+    # 提取微信元数据
+    group_name = ""
+    member_nick = ""
+    group_wxid = ""
+    member_wxid = ""
+    msg_id = ""
+    timestamp = ""
+
+    if callback_data:
+        msg = callback_data.get('message', {})
+        group_info = callback_data.get('group_info', {})
+
+        group_name = group_info.get('group_name', "")
+        member_nick = group_info.get('member_nick', "")
+        group_wxid = msg.get('from_wxid', "")
+        member_wxid = msg.get('final_from_wxid', "")
+        msg_id = msg.get('msg_id', "")
+        timestamp = msg.get('timestamp', "")
+
     for item in json_data:
         if isinstance(item, dict):
-            # 创建dataclass对象，会自动进行类型转换
+            # 先创建基础的dataclass对象
             wechat_data = WeChatMessageData.from_dict(item)
+
+            # 添加微信元数据
+            wechat_data.group_name = group_name
+            wechat_data.member_nick = member_nick
+            wechat_data.group_wxid = group_wxid
+            wechat_data.member_wxid = member_wxid
+            wechat_data.msg_id = msg_id
+            wechat_data.timestamp = timestamp
+
+            # 设置原始信息为消息内容
+            if not wechat_data.original_info and callback_data:
+                msg_content = callback_data.get('message', {}).get('content', '')
+                wechat_data.original_info = msg_content
+
             result.append(wechat_data)
 
     return result
@@ -223,8 +279,8 @@ def data_callback(data: Dict):
 
     print(f"✅ JSON格式验证通过，数据类型: {type(json_data)}")
 
-    # 转换为dataclass对象列表
-    wechat_data_list = json_to_wechat_message_data_list(json_data)
+    # 转换为dataclass对象列表，传入回调数据以包含微信元数据
+    wechat_data_list = json_to_wechat_message_data_list(json_data, data)
     if not wechat_data_list:
         print(f"❌ 转换为dataclass对象失败")
         return
@@ -241,6 +297,11 @@ def data_callback(data: Dict):
         print(f"📍 地区: {wechat_data.location}")
         print(f"💰 价格: {wechat_data.price}")
         print(f"🛡️ 社保要求: {wechat_data.social_security}")
+        # 显示微信元数据
+        print(f"👥 群名称: {wechat_data.group_name}")
+        print(f"👤 发送者: {wechat_data.member_nick} ({wechat_data.member_wxid})")
+        print(f"🏷️ 群ID: {wechat_data.group_wxid}")
+        print(f"📅 时间: {wechat_data.timestamp}")
 
         # 调用证书拆分AI
         cert_response = cert_split_agent.chat(
