@@ -7,8 +7,70 @@
 
 import time
 import json
-from typing import Dict, List
+from typing import Dict, List, Optional
+from dataclasses import dataclass
 from ai.glm_agent import GLMAgent
+
+
+@dataclass
+class WeChatMessageData:
+    """微信消息数据结构规范"""
+    type: str = ""                    # 交易类型（如：招聘、寻证、出场等）
+    certificates: str = ""            # 原始证书信息（未拆分）
+    social_security: str = ""         # 社保要求（如：唯一社保、转社保、无要求等）
+    location: str = ""               # 地区信息（如：浙江省、宁波市等）
+    price: int = 0                   # 价格信息
+    other_info: str = ""             # 其他信息
+    original_info: str = ""          # 原始消息内容
+
+    def to_dict(self) -> Dict:
+        """转换为字典格式"""
+        return {
+            "type": self.type,
+            "certificates": self.certificates,
+            "social_security": self.social_security,
+            "location": self.location,
+            "price": self.price,
+            "other_info": self.other_info,
+            "original_info": self.original_info
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'WeChatMessageData':
+        """从字典创建dataclass实例"""
+        return cls(
+            type=data.get("type", ""),
+            certificates=data.get("certificates", ""),
+            social_security=data.get("social_security", ""),
+            location=data.get("location", ""),
+            price=data.get("price", 0),
+            other_info=data.get("other_info", ""),
+            original_info=data.get("original_info", "")
+        )
+
+
+def json_to_wechat_message_data_list(json_data: List[Dict]) -> List[WeChatMessageData]:
+    """
+    将JSON数据转换为WeChatMessageData对象列表
+
+    Args:
+        json_data: AI返回的JSON数据列表
+
+    Returns:
+        List[WeChatMessageData]: 转换后的dataclass对象列表
+    """
+    if not isinstance(json_data, list):
+        return []
+
+    result = []
+    for item in json_data:
+        if isinstance(item, dict):
+            # 创建dataclass对象，会自动进行类型转换
+            wechat_data = WeChatMessageData.from_dict(item)
+            result.append(wechat_data)
+
+    return result
+
 
 def clean_ai_response(response: str) -> str:
     """清洗AI响应数据，移除markdown标记等"""
@@ -157,19 +219,29 @@ def data_callback(data: Dict):
         return
 
     print(f"✅ JSON格式验证通过，数据类型: {type(json_data)}")
-    if isinstance(json_data, list):
-        print(f"📊 解析到 {len(json_data)} 条数据")
+
+    # 转换为dataclass对象列表
+    wechat_data_list = json_to_wechat_message_data_list(json_data)
+    if not wechat_data_list:
+        print(f"❌ 转换为dataclass对象失败")
+        return
+
+    print(f"📊 解析到 {len(wechat_data_list)} 条数据")
 
     # 处理每条数据的证书信息
-    for item in json_data:
-        if 'certificates' not in item:
+    for wechat_data in wechat_data_list:
+        if not wechat_data.certificates:  # 使用dataclass属性访问
             continue
 
-        print(f"🔍 处理证书: {item['certificates']}")
+        print(f"🔍 处理证书: {wechat_data.certificates}")
+        print(f"📋 交易类型: {wechat_data.type}")
+        print(f"📍 地区: {wechat_data.location}")
+        print(f"💰 价格: {wechat_data.price}")
+        print(f"🛡️ 社保要求: {wechat_data.social_security}")
 
         # 调用证书拆分AI
         cert_response = cert_split_agent.chat(
-            item['certificates'],  # 证书str
+            wechat_data.certificates,  # 使用dataclass属性
             system_prompt=cert_split_construction_prompt,  # 系统提示词：完整的提示词
             temperature=0.1  # 使用较低的温度以确保输出的准确性
         )
@@ -181,70 +253,18 @@ def data_callback(data: Dict):
             print(f"✅ 转换后的证书列表: {cert_list}")
             print(f"📊 证书类型: {type(cert_list)}, 数量: {len(cert_list)}")
 
+            # 更新dataclass对象的证书信息（可选）
+            # 这里可以添加拆分后的证书列表到wechat_data对象中
+            # 例如：wechat_data.split_certificates = cert_list
+
             # 这里可以进一步处理证书列表，比如存入数据库等
-            # process_certificates(cert_list)
+            # process_certificates(cert_list, wechat_data)
         else:
             print(f"❌ 证书列表解析失败")
+
+        # 添加分隔线，便于阅读
+        print("-" * 50)
 
     print(f"完成处理消息: {msg['msg_id']}")
 
 
-def create_monitored_callback(monitored_groups: List[str],
-                           processing_func=None,
-                           processing_time: float = 0):
-    """
-    创建自定义的群聊监听回调函数
-
-    Args:
-        monitored_groups (List[str]): 需要监听的群聊ID列表
-        processing_func (callable, optional): 自定义处理函数，接收data参数
-        processing_time (float): 模拟处理时间（秒）
-
-    Returns:
-        callable: 配置好的回调函数
-    """
-    def custom_callback(data: Dict):
-        msg = data['message']
-
-        # 只处理群聊消息
-        if msg['from_type'] != 2:
-            return
-
-        # 过滤只监听指定群聊
-        if msg['from_wxid'] not in monitored_groups:
-            return
-
-        # 使用自定义处理函数或默认处理逻辑
-        if processing_func:
-            processing_func(data)
-        else:
-            # 默认处理逻辑
-            group_name = data['group_info']['group_name']
-            print(f"处理消息 [{group_name}]: {msg['content'][:50]}...")
-
-            if processing_time > 0:
-                time.sleep(processing_time)
-
-            print(f"完成处理: {msg['msg_id']}")
-
-    return custom_callback
-
-
-# 可以定义其他专业的处理函数
-def construction_cert_processor(data: Dict):
-    """
-    建筑资质证书专用处理器
-    专门处理建筑相关的证书交易信息
-    """
-    msg = data['message']
-    group_name = data['group_info']['group_name']
-
-    # 这里可以添加AI分析、数据提取等逻辑
-    print(f"🏗️ 建筑资质处理器 - 群聊: {group_name}")
-    print(f"📝 消息内容: {msg['content']}")
-
-    # 可以调用AI模块进行数据分析
-    # 例如：提取证书类型、价格、地区等信息
-
-    time.sleep(5)  # 模拟AI处理时间
-    print(f"✅ 建筑资质数据处理完成: {msg['msg_id']}")
