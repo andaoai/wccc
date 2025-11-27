@@ -264,6 +264,18 @@ class WeChatMessageDAO:
                 except ValueError:
                     continue
 
+            # 尝试解析为毫秒时间戳
+            try:
+                timestamp_ms = int(timestamp_str)
+                # 判断是秒还是毫秒时间戳
+                if timestamp_ms > 1e10:  # 大于10^10认为是毫秒时间戳
+                    return datetime.fromtimestamp(timestamp_ms / 1000.0)
+                else:  # 否则为秒时间戳
+                    return datetime.fromtimestamp(timestamp_ms)
+            except (ValueError, OSError) as e:
+                logger.debug(f"时间戳数字解析失败: {e}")
+                pass
+
             logger.warning(f"无法解析时间戳格式: {timestamp_str}")
             return None
 

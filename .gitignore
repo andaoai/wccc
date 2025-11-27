@@ -2,3 +2,4 @@ __pycache__
 
 # PostgreSQL data
 data/postgres/
+crm/cordys

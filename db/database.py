@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 # 数据库连接配置
 DB_CONFIG = {
     'host': os.getenv('POSTGRES_HOST', 'localhost'),
-    'port': os.getenv('POSTGRES_PORT', '5433'),  # 使用5433端口匹配Docker配置
-    'database': os.getenv('POSTGRES_DB', 'wccc'),
+    'port': os.getenv('POSTGRES_PORT', '54768'), 
+    'database': os.getenv('POSTGRES_DB', 'postgres'),
     'user': os.getenv('POSTGRES_USER', 'postgres'),
-    'password': os.getenv('POSTGRES_PASSWORD', 'postgres')
+    'password': os.getenv('POSTGRES_PASSWORD', 'your_secure_password_here')
 }
 
 class DatabaseManager:
