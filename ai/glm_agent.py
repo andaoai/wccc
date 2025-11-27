@@ -73,7 +73,7 @@ class GLMAgent:
                 messages=self.conversation_history[session_id],
                 max_tokens=max_tokens,
                 temperature=temperature,
-                thinking={"type": "enabled"} if enable_thinking else None
+                thinking={"type": "disabled"} if enable_thinking else None
             )
 
             # 获取回复
@@ -140,7 +140,7 @@ class GLMAgent:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 stream=True,
-                thinking={"type": "enabled"} if enable_thinking else None
+                thinking={"type": "disabled"} if enable_thinking else None
             )
 
             full_response = ""
