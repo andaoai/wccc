@@ -1,7 +1,12 @@
 -- 查询包含指定证书的出类型数据
 -- 配置目标证书数组 - 只需在这里修改一次
 WITH target_certs AS (
-    SELECT ARRAY['一级市政', 'B证']::text[] as certificates
+    SELECT ARRAY[
+        'B证',          -- 234
+        -- '二级市政'  161
+        -- '二级建筑'  101
+        -- '二级机电'  77
+        ]::text[] as certificates
 ),
 ranked_messages AS (
     SELECT *,
