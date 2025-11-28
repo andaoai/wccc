@@ -58,38 +58,56 @@ def load_data():
     """加载数据库数据"""
     try:
         with db_manager.get_cursor(dict_cursor=True) as cursor:
-            # 查询收类型数据（包括收、接、招聘、寻）
+            # 查询收类型数据（包括收、接、招聘、寻），使用窗口函数去重并保留重复计数
             cursor.execute("""
-                SELECT *, '收' as transaction_category
-                FROM wechat_messages
-                WHERE type LIKE '%收%'
-                   OR type LIKE '%接%'
-                   OR type LIKE '%招聘%'
-                   OR type LIKE '%寻%'
+                WITH ranked_messages AS (
+                    SELECT *,
+                           ROW_NUMBER() OVER (PARTITION BY original_info, member_wxid ORDER BY created_at DESC) as rn,
+                           COUNT(*) OVER (PARTITION BY original_info, member_wxid) as duplicate_count,
+                           '收' as transaction_category
+                    FROM wechat_messages
+                    WHERE type LIKE '%收%'
+                       OR type LIKE '%接%'
+                       OR type LIKE '%招聘%'
+                       OR type LIKE '%寻%'
+                )
+                SELECT * FROM ranked_messages WHERE rn = 1
                 ORDER BY created_at DESC
                 LIMIT 5000
             """)
             receive_messages = cursor.fetchall()
 
-            # 查询出类型数据（包括出）
+            # 查询出类型数据（包括出），使用窗口函数去重并保留重复计数
             cursor.execute("""
-                SELECT *, '出' as transaction_category
-                FROM wechat_messages
-                WHERE type LIKE '%出%'
+                WITH ranked_messages AS (
+                    SELECT *,
+                           ROW_NUMBER() OVER (PARTITION BY original_info, member_wxid ORDER BY created_at DESC) as rn,
+                           COUNT(*) OVER (PARTITION BY original_info, member_wxid) as duplicate_count,
+                           '出' as transaction_category
+                    FROM wechat_messages
+                    WHERE type LIKE '%出%'
+                )
+                SELECT * FROM ranked_messages WHERE rn = 1
                 ORDER BY created_at DESC
                 LIMIT 5000
             """)
             send_messages = cursor.fetchall()
 
-            # 查询其他类型数据
+            # 查询其他类型数据，使用窗口函数去重并保留重复计数
             cursor.execute("""
-                SELECT *, '其他' as transaction_category
-                FROM wechat_messages
-                WHERE type NOT LIKE '%收%'
-                   AND type NOT LIKE '%接%'
-                   AND type NOT LIKE '%招聘%'
-                   AND type NOT LIKE '%寻%'
-                   AND type NOT LIKE '%出%'
+                WITH ranked_messages AS (
+                    SELECT *,
+                           ROW_NUMBER() OVER (PARTITION BY original_info, member_wxid ORDER BY created_at DESC) as rn,
+                           COUNT(*) OVER (PARTITION BY original_info, member_wxid) as duplicate_count,
+                           '其他' as transaction_category
+                    FROM wechat_messages
+                    WHERE type NOT LIKE '%收%'
+                       AND type NOT LIKE '%接%'
+                       AND type NOT LIKE '%招聘%'
+                       AND type NOT LIKE '%寻%'
+                       AND type NOT LIKE '%出%'
+                )
+                SELECT * FROM ranked_messages WHERE rn = 1
                 ORDER BY created_at DESC
                 LIMIT 1000
             """)
@@ -137,7 +155,7 @@ def display_categorized_data():
         # 选择要显示的列
         display_columns = [
             'created_at', 'type', 'certificates', 'location',
-            'price', 'group_name', 'member_nick', 'split_certificates'
+            'price', 'group_name', 'member_nick', 'split_certificates', 'duplicate_count'
         ]
 
         # 确保列存在
@@ -161,7 +179,8 @@ def display_categorized_data():
             'price': '价格',
             'group_name': '群组',
             'member_nick': '成员',
-            'split_certificates': '拆分证书'
+            'split_certificates': '拆分证书',
+            'duplicate_count': '重复次数'
         }
         df_display = df_display.rename(columns=column_names)
 
