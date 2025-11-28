@@ -54,63 +54,44 @@ def classify_transaction_type(type_str):
     else:
         return "其他"
 
+def read_sql_file(filename):
+    """读取 SQL 文件"""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    sql_file_path = os.path.join(current_dir, 'sql', filename)
+
+    try:
+        with open(sql_file_path, 'r', encoding='utf-8') as file:
+            return file.read()
+    except FileNotFoundError:
+        st.error(f"SQL 文件未找到: {sql_file_path}")
+        return None
+    except Exception as e:
+        st.error(f"读取 SQL 文件时出错: {e}")
+        return None
+
 def load_data():
     """加载数据库数据"""
     try:
+        # 读取 SQL 文件
+        receive_sql = read_sql_file('receive_messages.sql')
+        send_sql = read_sql_file('send_messages.sql')
+        other_sql = read_sql_file('other_messages.sql')
+
+        if not all([receive_sql, send_sql, other_sql]):
+            st.error("无法加载 SQL 查询文件")
+            return pd.DataFrame()
+
         with db_manager.get_cursor(dict_cursor=True) as cursor:
-            # 查询收类型数据（包括收、接、招聘、寻），使用窗口函数去重并保留重复计数
-            cursor.execute("""
-                WITH ranked_messages AS (
-                    SELECT *,
-                           ROW_NUMBER() OVER (PARTITION BY original_info, member_wxid ORDER BY created_at DESC) as rn,
-                           COUNT(*) OVER (PARTITION BY original_info, member_wxid) as duplicate_count,
-                           '收' as transaction_category
-                    FROM wechat_messages
-                    WHERE type LIKE '%收%'
-                       OR type LIKE '%接%'
-                       OR type LIKE '%招聘%'
-                       OR type LIKE '%寻%'
-                )
-                SELECT * FROM ranked_messages WHERE rn = 1
-                ORDER BY created_at DESC
-                LIMIT 5000
-            """)
+            # 执行收类型查询
+            cursor.execute(receive_sql)
             receive_messages = cursor.fetchall()
 
-            # 查询出类型数据（包括出），使用窗口函数去重并保留重复计数
-            cursor.execute("""
-                WITH ranked_messages AS (
-                    SELECT *,
-                           ROW_NUMBER() OVER (PARTITION BY original_info, member_wxid ORDER BY created_at DESC) as rn,
-                           COUNT(*) OVER (PARTITION BY original_info, member_wxid) as duplicate_count,
-                           '出' as transaction_category
-                    FROM wechat_messages
-                    WHERE type LIKE '%出%'
-                )
-                SELECT * FROM ranked_messages WHERE rn = 1
-                ORDER BY created_at DESC
-                LIMIT 5000
-            """)
+            # 执行出类型查询
+            cursor.execute(send_sql)
             send_messages = cursor.fetchall()
 
-            # 查询其他类型数据，使用窗口函数去重并保留重复计数
-            cursor.execute("""
-                WITH ranked_messages AS (
-                    SELECT *,
-                           ROW_NUMBER() OVER (PARTITION BY original_info, member_wxid ORDER BY created_at DESC) as rn,
-                           COUNT(*) OVER (PARTITION BY original_info, member_wxid) as duplicate_count,
-                           '其他' as transaction_category
-                    FROM wechat_messages
-                    WHERE type NOT LIKE '%收%'
-                       AND type NOT LIKE '%接%'
-                       AND type NOT LIKE '%招聘%'
-                       AND type NOT LIKE '%寻%'
-                       AND type NOT LIKE '%出%'
-                )
-                SELECT * FROM ranked_messages WHERE rn = 1
-                ORDER BY created_at DESC
-                LIMIT 1000
-            """)
+            # 执行其他类型查询
+            cursor.execute(other_sql)
             other_messages = cursor.fetchall()
 
             # 合并所有数据
