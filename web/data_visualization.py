@@ -387,12 +387,14 @@ def display_data_table():
     display_categorized_data()
 
 
-def sidebar_filters(location_filter=None, fuzzy_location_input=None, use_fuzzy_search=False):
+def sidebar_filters(location_filter=None, fuzzy_location_input=None, use_fuzzy_search=False, time_filter="全部时间"):
     """侧边栏筛选功能（支持多选和模糊搜索同时使用）"""
     st.sidebar.markdown("## 🔍 数据筛选")
 
     if not st.session_state.all_messages:
         return
+
+    # 移除侧边栏时间筛选，使用全局时间筛选参数
 
     # 应用地区筛选 - 支持多个地区、"无地区信息"选项和模糊搜索同时使用
     base_messages = st.session_state.all_messages
@@ -430,6 +432,44 @@ def sidebar_filters(location_filter=None, fuzzy_location_input=None, use_fuzzy_s
                 if use_fuzzy_search and fuzzy_match:
                     base_messages.append(msg)
 
+    # 应用时间筛选（使用全局参数）
+    if time_filter and time_filter != "全部时间":
+        from datetime import datetime, timedelta
+        now = datetime.now()
+
+        if time_filter == "最近3天":
+            cutoff_date = now - timedelta(days=3)
+        elif time_filter == "最近7天":
+            cutoff_date = now - timedelta(days=7)
+        elif time_filter == "最近30天":
+            cutoff_date = now - timedelta(days=30)
+        else:
+            cutoff_date = None
+
+        if cutoff_date:
+            filtered_by_time = []
+            for msg in base_messages:
+                created_at = msg.get('created_at')
+                if created_at:
+                    # 处理不同的时间格式
+                    if isinstance(created_at, str):
+                        try:
+                            created_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        except:
+                            try:
+                                # 尝试其他常见格式
+                                created_dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+                            except:
+                                continue
+                    elif isinstance(created_at, datetime):
+                        created_dt = created_at
+                    else:
+                        continue
+
+                    if created_dt >= cutoff_date:
+                        filtered_by_time.append(msg)
+            base_messages = filtered_by_time
+
     df = pd.DataFrame(base_messages)
 
     # 交易分类筛选（收/出/其他）
@@ -464,6 +504,8 @@ def business_opportunity_filters(location_filter=None, fuzzy_location_input=None
         return
 
     st.sidebar.markdown("## 💼 商机筛选")
+
+    # 移除侧边栏时间筛选，统一使用主界面的时间筛选
 
     # 应用地区筛选 - 支持多个地区、"无地区信息"选项和模糊搜索同时使用
     base_business_messages = st.session_state.business_messages
@@ -503,6 +545,8 @@ def business_opportunity_filters(location_filter=None, fuzzy_location_input=None
 
     df = pd.DataFrame(base_business_messages)
 
+    # 移除时间筛选逻辑，统一在 display_business_opportunity_dashboard 中处理
+
     # 供应匹配度筛选
     if 'total_supply_count' in df.columns:
         # 处理Decimal类型数据
@@ -535,17 +579,7 @@ def business_opportunity_filters(location_filter=None, fuzzy_location_input=None
                 if msg.get('available_certificates_count') == selected_cert_count
             ]
 
-    # 地区筛选
-    if 'location' in df.columns:
-        locations = ['全部'] + sorted([loc for loc in df['location'].dropna().unique() if loc and loc.strip()])
-        selected_location = st.sidebar.selectbox("地区", locations)
-
-        if selected_location != '全部':
-            current_filtered = st.session_state.filtered_business.copy()
-            st.session_state.filtered_business = [
-                msg for msg in current_filtered
-                if msg.get('location') == selected_location
-            ]
+    # 移除重复的地区筛选，使用主界面传递的地区筛选参数
 
     # 交易类型筛选
     if 'type' in df.columns:
@@ -559,11 +593,25 @@ def business_opportunity_filters(location_filter=None, fuzzy_location_input=None
                 if msg.get('type') == selected_type
             ]
 
-def display_business_opportunity_dashboard(location_filter=None, fuzzy_location_input=None, use_fuzzy_search=False):
+def display_business_opportunity_dashboard(location_filter=None, fuzzy_location_input=None, use_fuzzy_search=False, time_filter="全部时间"):
     """显示商机匹配仪表板（支持多选和模糊搜索同时使用）"""
     if 'business_messages' not in st.session_state or not st.session_state.business_messages:
         st.info("暂无商机数据")
         return
+
+    # 显示当前地区筛选状态
+    if (location_filter and len(location_filter) > 0) or (use_fuzzy_search and fuzzy_location_input and fuzzy_location_input.strip()):
+        exact_count = len(location_filter) if location_filter else 0
+        fuzzy_status = f"模糊搜索 '{fuzzy_location_input}'" if use_fuzzy_search and fuzzy_location_input.strip() else ""
+
+        if exact_count > 0 and fuzzy_status:
+            st.success(f"🌍 地区筛选已激活：精确匹配 {exact_count} 个地区 + {fuzzy_status}")
+        elif exact_count > 0:
+            st.success(f"🌍 地区筛选已激活：精确匹配 {exact_count} 个地区")
+        elif fuzzy_status:
+            st.success(f"🌍 地区筛选已激活：{fuzzy_status}")
+    else:
+        st.info("🌍 未设置地区筛选，显示全部地区数据")
 
     # 应用地区筛选 - 支持多个地区、"无地区信息"选项和模糊搜索同时使用
     base_business_messages = st.session_state.business_messages
@@ -601,31 +649,50 @@ def display_business_opportunity_dashboard(location_filter=None, fuzzy_location_
                 if use_fuzzy_search and fuzzy_match:
                     base_business_messages.append(msg)
 
-    # 初始化筛选后的商机数据
-    if 'filtered_business' not in st.session_state:
-        st.session_state.filtered_business = base_business_messages.copy()
-    else:
-        # 如果有地区筛选，重新应用
-        if location_filter and len(location_filter) > 0:
-            filtered_business = []
-            for msg in st.session_state.filtered_business:
-                msg_location = msg.get('location')
+    # 应用时间筛选（使用从主界面传递的参数）
+    if time_filter and time_filter != "全部时间":
+        from datetime import datetime, timedelta
+        now = datetime.now()
 
-                # 检查是否匹配选中的地区
-                if msg_location in location_filter:
-                    filtered_business.append(msg)
-                # 检查是否选择了"无地区信息"且消息没有有效地区
-                elif '无地区信息' in location_filter and (
-                    msg_location is None or
-                    msg_location == '' or
-                    msg_location == 'None' or
-                    (isinstance(msg_location, str) and msg_location.strip() == '')
-                ):
-                    filtered_business.append(msg)
+        if time_filter == "最近3天":
+            cutoff_date = now - timedelta(days=3)
+        elif time_filter == "最近7天":
+            cutoff_date = now - timedelta(days=7)
+        elif time_filter == "最近30天":
+            cutoff_date = now - timedelta(days=30)
+        else:
+            cutoff_date = None
 
-            st.session_state.filtered_business = filtered_business
+        if cutoff_date:
+            filtered_by_time = []
+            for msg in base_business_messages:
+                created_at = msg.get('created_at')
+                if created_at:
+                    # 处理不同的时间格式
+                    if isinstance(created_at, str):
+                        try:
+                            created_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        except:
+                            try:
+                                # 尝试其他常见格式
+                                created_dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+                            except:
+                                continue
+                    elif isinstance(created_at, datetime):
+                        created_dt = created_at
+                    else:
+                        continue
 
-    df = pd.DataFrame(st.session_state.filtered_business)
+                    if created_dt >= cutoff_date:
+                        filtered_by_time.append(msg)
+            base_business_messages = filtered_by_time
+
+    # 直接使用已经筛选好的数据，不要重复应用地区筛选
+    df = pd.DataFrame(base_business_messages)
+
+    # 显示时间筛选提示
+    if time_filter and time_filter != "全部时间":
+        st.info(f"📅 当前显示 {time_filter} 内的数据，共 {len(df)} 条商机")
 
     # 显示总体统计
     st.markdown("## 📊 商机匹配概览")
@@ -854,6 +921,28 @@ def display_certificate_query_page():
         fuzzy_location = ""
         st.warning("未找到地区数据")
 
+    # 时间筛选区域
+    st.markdown("### 📅 时间筛选")
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        time_filter_options = ["全部时间", "最近3天", "最近7天", "最近30天"]
+        selected_time_filter = st.selectbox(
+            "选择时间范围",
+            options=time_filter_options,
+            index=1,  # 默认选择"最近3天"
+            help="筛选指定时间范围内的证书数据"
+        )
+
+    with col2:
+        st.markdown("**时间统计**")
+        st.info("📅 按时间筛选数据")
+
+    # 显示时间筛选提示
+    if selected_time_filter != "全部时间":
+        st.success(f"📅 将查询 {selected_time_filter} 内的证书数据")
+    else:
+        st.info("📅 查询全部时间的数据")
+
     with col2:
         st.markdown("### 🚀 快速操作")
 
@@ -917,6 +1006,44 @@ def display_certificate_query_page():
                     location_filter=location_filter,
                     fuzzy_search=use_fuzzy_search
                 )
+
+        # 应用时间筛选到查询结果
+        if query_results and selected_time_filter != "全部时间":
+            from datetime import datetime, timedelta
+            now = datetime.now()
+
+            if selected_time_filter == "最近3天":
+                cutoff_date = now - timedelta(days=3)
+            elif selected_time_filter == "最近7天":
+                cutoff_date = now - timedelta(days=7)
+            elif selected_time_filter == "最近30天":
+                cutoff_date = now - timedelta(days=30)
+            else:
+                cutoff_date = None
+
+            if cutoff_date:
+                filtered_by_time = []
+                for msg in query_results:
+                    created_at = msg.get('created_at')
+                    if created_at:
+                        # 处理不同的时间格式
+                        if isinstance(created_at, str):
+                            try:
+                                created_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                            except:
+                                try:
+                                    # 尝试其他常见格式
+                                    created_dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+                                except:
+                                    continue
+                        elif isinstance(created_at, datetime):
+                            created_dt = created_at
+                        else:
+                            continue
+
+                        if created_dt >= cutoff_date:
+                            filtered_by_time.append(msg)
+                query_results = filtered_by_time
 
         if query_results:
             df = pd.DataFrame(query_results)
@@ -1095,6 +1222,16 @@ def main():
             fuzzy_location_input = ""
             st.warning("未找到地区数据")
 
+        # 时间筛选选项 - 全局时间筛选
+        st.markdown("### 📅 时间筛选")
+        time_filter_options = ["全部时间", "最近3天", "最近7天", "最近30天"]
+        global_time_filter = st.selectbox(
+            "选择时间范围",
+            options=time_filter_options,
+            index=1,  # 默认选择"最近3天"
+            help="筛选指定时间范围内的数据"
+        )
+
         # 数据加载按钮
         if st.button("🔄 重新加载数据"):
             st.session_state.data_loaded = False
@@ -1130,14 +1267,16 @@ def main():
                 display_business_opportunity_dashboard(
                     location_filter=selected_locations,
                     fuzzy_location_input=fuzzy_location_input,
-                    use_fuzzy_search=use_fuzzy_search
+                    use_fuzzy_search=use_fuzzy_search,
+                    time_filter=global_time_filter
                 )
             else:
                 # 原始数据总览页面 - 同时传递多选和模糊搜索参数
                 sidebar_filters(
                     location_filter=selected_locations,
                     fuzzy_location_input=fuzzy_location_input,
-                    use_fuzzy_search=use_fuzzy_search
+                    use_fuzzy_search=use_fuzzy_search,
+                    time_filter=global_time_filter
                 )
                 display_data_table()
 
