@@ -102,8 +102,8 @@ def get_all_locations():
         st.error(f"获取地区列表失败: {e}")
         return ['无地区信息']
 
-def query_by_location(location, message_types=None):
-    """按地区查询消息"""
+def query_by_location(location, message_types=None, fuzzy_search=False):
+    """按地区查询消息（支持模糊查询）"""
     try:
         # 构建类型筛选条件
         type_condition = ""
@@ -119,8 +119,20 @@ def query_by_location(location, message_types=None):
             if conditions:
                 type_condition = " AND (" + " OR ".join(conditions) + ")"
 
+        # 构建地区查询条件
+        if location == '无地区信息':
+            location_condition = "(location IS NULL OR location = '' OR location = 'None' OR TRIM(location) = '')"
+        elif fuzzy_search:
+            # 模糊查询：支持字符串部分匹配
+            location_condition = "location LIKE %s"
+            location_param = f"%{location}%"
+        else:
+            # 精确查询
+            location_condition = "location = %s"
+            location_param = location
+
         # 构建动态SQL
-        base_sql = """
+        base_sql = f"""
         WITH ranked_messages AS (
             SELECT *,
                    ROW_NUMBER() OVER (PARTITION BY original_info, member_wxid ORDER BY created_at DESC) as rn,
@@ -131,7 +143,7 @@ def query_by_location(location, message_types=None):
                        ELSE '其他'
                    END as transaction_category
             FROM wechat_messages
-            WHERE location = %s
+            WHERE {location_condition}
         """ + type_condition + """
         )
         SELECT *
@@ -142,7 +154,10 @@ def query_by_location(location, message_types=None):
         """
 
         with db_manager.get_cursor(dict_cursor=True) as cursor:
-            cursor.execute(base_sql, (location,))
+            if location == '无地区信息':
+                cursor.execute(base_sql)
+            else:
+                cursor.execute(base_sql, (location_param,))
             results = cursor.fetchall()
             return [dict(msg) for msg in results]
 
@@ -150,11 +165,20 @@ def query_by_location(location, message_types=None):
         st.error(f"地区查询失败: {e}")
         return []
 
-def query_certificates(target_certs):
-    """动态查询指定证书"""
+def query_certificates(target_certs, location_filter=None, fuzzy_search=False):
+    """动态查询指定证书（支持地区筛选和模糊搜索）"""
     try:
         # 构建动态SQL
         certs_formatted = "', '".join(target_certs)
+
+        # 构建地区筛选条件
+        location_condition = ""
+        if location_filter and location_filter != "全部":
+            if fuzzy_search:
+                location_condition = f"AND location LIKE '%{location_filter}%'"
+            else:
+                location_condition = f"AND location = '{location_filter}'"
+
         dynamic_sql = f"""
         WITH target_certs AS (
             SELECT ARRAY['{certs_formatted}']::text[] as certificates
@@ -207,6 +231,7 @@ def query_certificates(target_certs):
 
             FROM wechat_messages
             WHERE type LIKE '%出%'
+              {location_condition}
         )
         SELECT
             *
@@ -362,31 +387,48 @@ def display_data_table():
     display_categorized_data()
 
 
-def sidebar_filters(location_filter=None):
-    """侧边栏筛选功能"""
+def sidebar_filters(location_filter=None, fuzzy_location_input=None, use_fuzzy_search=False):
+    """侧边栏筛选功能（支持多选和模糊搜索同时使用）"""
     st.sidebar.markdown("## 🔍 数据筛选")
 
     if not st.session_state.all_messages:
         return
 
-    # 应用地区筛选 - 支持多个地区和"无地区信息"选项
+    # 应用地区筛选 - 支持多个地区、"无地区信息"选项和模糊搜索同时使用
     base_messages = st.session_state.all_messages
-    if location_filter and len(location_filter) > 0:
+
+    # 如果有地区筛选条件（精确匹配或模糊搜索）
+    if (location_filter and len(location_filter) > 0) or (use_fuzzy_search and fuzzy_location_input and fuzzy_location_input.strip()):
         base_messages = []
         for msg in st.session_state.all_messages:
             msg_location = msg.get('location')
 
-            # 检查是否匹配选中的地区
-            if msg_location in location_filter:
+            # 精确匹配检查
+            exact_match = False
+            if location_filter and len(location_filter) > 0:
+                if msg_location in location_filter:
+                    exact_match = True
+                elif '无地区信息' in location_filter and (
+                    msg_location is None or
+                    msg_location == '' or
+                    msg_location == 'None' or
+                    (isinstance(msg_location, str) and msg_location.strip() == '')
+                ):
+                    exact_match = True
+
+            # 模糊搜索检查
+            fuzzy_match = False
+            if use_fuzzy_search and fuzzy_location_input and fuzzy_location_input.strip():
+                search_keyword = fuzzy_location_input.strip().lower()
+                if msg_location and isinstance(msg_location, str) and search_keyword in msg_location.lower():
+                    fuzzy_match = True
+
+            # 匹配逻辑：精确匹配 OR 模糊搜索（只要满足任一条件就包含）
+            if (location_filter and len(location_filter) > 0 and exact_match) or (use_fuzzy_search and fuzzy_match):
                 base_messages.append(msg)
-            # 检查是否选择了"无地区信息"且消息没有有效地区
-            elif '无地区信息' in location_filter and (
-                msg_location is None or
-                msg_location == '' or
-                msg_location == 'None' or
-                (isinstance(msg_location, str) and msg_location.strip() == '')
-            ):
-                base_messages.append(msg)
+            elif not location_filter or len(location_filter) == 0:  # 如果没有精确匹配，只考虑模糊搜索
+                if use_fuzzy_search and fuzzy_match:
+                    base_messages.append(msg)
 
     df = pd.DataFrame(base_messages)
 
@@ -416,31 +458,48 @@ def sidebar_filters(location_filter=None):
                 if msg.get('type') == selected_type
             ]
 
-def business_opportunity_filters(location_filter=None):
-    """商机数据筛选功能"""
+def business_opportunity_filters(location_filter=None, fuzzy_location_input=None, use_fuzzy_search=False):
+    """商机数据筛选功能（支持多选和模糊搜索同时使用）"""
     if 'business_messages' not in st.session_state or not st.session_state.business_messages:
         return
 
     st.sidebar.markdown("## 💼 商机筛选")
 
-    # 应用地区筛选 - 支持多个地区和"无地区信息"选项
+    # 应用地区筛选 - 支持多个地区、"无地区信息"选项和模糊搜索同时使用
     base_business_messages = st.session_state.business_messages
-    if location_filter and len(location_filter) > 0:
+
+    # 如果有地区筛选条件（精确匹配或模糊搜索）
+    if (location_filter and len(location_filter) > 0) or (use_fuzzy_search and fuzzy_location_input and fuzzy_location_input.strip()):
         base_business_messages = []
         for msg in st.session_state.business_messages:
             msg_location = msg.get('location')
 
-            # 检查是否匹配选中的地区
-            if msg_location in location_filter:
+            # 精确匹配检查
+            exact_match = False
+            if location_filter and len(location_filter) > 0:
+                if msg_location in location_filter:
+                    exact_match = True
+                elif '无地区信息' in location_filter and (
+                    msg_location is None or
+                    msg_location == '' or
+                    msg_location == 'None' or
+                    (isinstance(msg_location, str) and msg_location.strip() == '')
+                ):
+                    exact_match = True
+
+            # 模糊搜索检查
+            fuzzy_match = False
+            if use_fuzzy_search and fuzzy_location_input and fuzzy_location_input.strip():
+                search_keyword = fuzzy_location_input.strip().lower()
+                if msg_location and isinstance(msg_location, str) and search_keyword in msg_location.lower():
+                    fuzzy_match = True
+
+            # 匹配逻辑：精确匹配 OR 模糊搜索（只要满足任一条件就包含）
+            if (location_filter and len(location_filter) > 0 and exact_match) or (use_fuzzy_search and fuzzy_match):
                 base_business_messages.append(msg)
-            # 检查是否选择了"无地区信息"且消息没有有效地区
-            elif '无地区信息' in location_filter and (
-                msg_location is None or
-                msg_location == '' or
-                msg_location == 'None' or
-                (isinstance(msg_location, str) and msg_location.strip() == '')
-            ):
-                base_business_messages.append(msg)
+            elif not location_filter or len(location_filter) == 0:  # 如果没有精确匹配，只考虑模糊搜索
+                if use_fuzzy_search and fuzzy_match:
+                    base_business_messages.append(msg)
 
     df = pd.DataFrame(base_business_messages)
 
@@ -500,30 +559,47 @@ def business_opportunity_filters(location_filter=None):
                 if msg.get('type') == selected_type
             ]
 
-def display_business_opportunity_dashboard(location_filter=None):
-    """显示商机匹配仪表板"""
+def display_business_opportunity_dashboard(location_filter=None, fuzzy_location_input=None, use_fuzzy_search=False):
+    """显示商机匹配仪表板（支持多选和模糊搜索同时使用）"""
     if 'business_messages' not in st.session_state or not st.session_state.business_messages:
         st.info("暂无商机数据")
         return
 
-    # 应用地区筛选 - 支持多个地区和"无地区信息"选项
+    # 应用地区筛选 - 支持多个地区、"无地区信息"选项和模糊搜索同时使用
     base_business_messages = st.session_state.business_messages
-    if location_filter and len(location_filter) > 0:
+
+    # 如果有地区筛选条件（精确匹配或模糊搜索）
+    if (location_filter and len(location_filter) > 0) or (use_fuzzy_search and fuzzy_location_input and fuzzy_location_input.strip()):
         base_business_messages = []
         for msg in st.session_state.business_messages:
             msg_location = msg.get('location')
 
-            # 检查是否匹配选中的地区
-            if msg_location in location_filter:
+            # 精确匹配检查
+            exact_match = False
+            if location_filter and len(location_filter) > 0:
+                if msg_location in location_filter:
+                    exact_match = True
+                elif isinstance(location_filter, list) and '无地区信息' in location_filter and (
+                    msg_location is None or
+                    msg_location == '' or
+                    msg_location == 'None' or
+                    (isinstance(msg_location, str) and msg_location.strip() == '')
+                ):
+                    exact_match = True
+
+            # 模糊搜索检查
+            fuzzy_match = False
+            if use_fuzzy_search and fuzzy_location_input and fuzzy_location_input.strip():
+                search_keyword = fuzzy_location_input.strip().lower()
+                if msg_location and isinstance(msg_location, str) and search_keyword in msg_location.lower():
+                    fuzzy_match = True
+
+            # 匹配逻辑：精确匹配 OR 模糊搜索（只要满足任一条件就包含）
+            if (location_filter and len(location_filter) > 0 and exact_match) or (use_fuzzy_search and fuzzy_match):
                 base_business_messages.append(msg)
-            # 检查是否选择了"无地区信息"且消息没有有效地区
-            elif '无地区信息' in location_filter and (
-                msg_location is None or
-                msg_location == '' or
-                msg_location == 'None' or
-                (isinstance(msg_location, str) and msg_location.strip() == '')
-            ):
-                base_business_messages.append(msg)
+            elif not location_filter or len(location_filter) == 0:  # 如果没有精确匹配，只考虑模糊搜索
+                if use_fuzzy_search and fuzzy_match:
+                    base_business_messages.append(msg)
 
     # 初始化筛选后的商机数据
     if 'filtered_business' not in st.session_state:
@@ -732,21 +808,50 @@ def display_certificate_query_page():
     st.markdown("### 🌍 地区筛选")
     all_locations = get_all_locations()
     if all_locations:
-        col1, col2 = st.columns([2, 1])
-        with col1:
+        # 精确匹配区域
+        with st.expander("📍 精确匹配地区（可选）", expanded=False):
             selected_location = st.selectbox(
-                "选择地区（可选）",
+                "选择完整地区名称（可选）",
                 options=["全部"] + all_locations,
                 index=0,
-                help="选择地区来筛选证书查询结果，留空查询全部地区"
+                help="选择一个完整地区名称来筛选证书查询结果"
             )
 
-        with col2:
-            st.markdown("**地区统计**")
-            if len(all_locations) > 0:
-                st.info(f"共有 {len(all_locations)} 个地区可选")
+        # 模糊搜索区域
+        with st.expander("🔍 模糊搜索地区（可选）", expanded=False):
+            location_input = st.text_input(
+                "输入地区关键词",
+                placeholder="例如：北京、广东、华东、华南等",
+                help="输入地区关键词，系统会查找包含该关键词的所有地区"
+            )
+
+            if location_input.strip():
+                st.info(f"🔍 将模糊搜索包含 '{location_input}' 的所有地区")
+                use_fuzzy_search = True
+                fuzzy_location = location_input.strip()
+            else:
+                st.info("📋 未输入模糊搜索关键词")
+                use_fuzzy_search = False
+                fuzzy_location = ""
+
+        # 综合提示
+        if selected_location != "全部" or use_fuzzy_search:
+            exact_text = f"精确匹配 '{selected_location}'" if selected_location != "全部" else ""
+            fuzzy_text = f"模糊搜索 '{fuzzy_location}'" if use_fuzzy_search else ""
+
+            if exact_text and fuzzy_text:
+                st.success(f"✅ 地区筛选已激活：{exact_text} + {fuzzy_text}")
+            elif exact_text:
+                st.success(f"✅ 地区筛选已激活：{exact_text}")
+            elif fuzzy_text:
+                st.success(f"✅ 地区筛选已激活：{fuzzy_text}")
+        else:
+            st.info("📋 未设置地区筛选，将查询全部地区")
+
     else:
         selected_location = "全部"
+        use_fuzzy_search = False
+        fuzzy_location = ""
         st.warning("未找到地区数据")
 
     with col2:
@@ -782,7 +887,36 @@ def display_certificate_query_page():
     # 执行查询
     if st.button("🔍 开始查询", key="execute_query"):
         with st.spinner("正在查询证书数据..."):
-            query_results = query_certificates(target_certs)
+            # 传递地区筛选参数 - 支持精确匹配和模糊搜索同时使用
+            exact_location = selected_location if selected_location != "全部" else None
+
+            # 如果既有精确匹配又有模糊搜索，需要两次查询并合并结果
+            if exact_location and use_fuzzy_search:
+                # 精确匹配查询
+                exact_results = query_certificates(
+                    target_certs,
+                    location_filter=exact_location,
+                    fuzzy_search=False
+                )
+                # 模糊搜索查询
+                fuzzy_results = query_certificates(
+                    target_certs,
+                    location_filter=fuzzy_location,
+                    fuzzy_search=True
+                )
+                # 合并结果并去重（基于消息ID）
+                all_results = {msg['id']: msg for msg in exact_results}
+                for msg in fuzzy_results:
+                    all_results[msg['id']] = msg
+                query_results = list(all_results.values())
+            else:
+                # 单一类型查询
+                location_filter = exact_location if exact_location else (fuzzy_location if use_fuzzy_search else None)
+                query_results = query_certificates(
+                    target_certs,
+                    location_filter=location_filter,
+                    fuzzy_search=use_fuzzy_search
+                )
 
         if query_results:
             df = pd.DataFrame(query_results)
@@ -915,24 +1049,51 @@ def main():
         page_options = ["📊 数据总览", "💼 商机匹配", "🔍 证书查询"]
         selected_page = st.selectbox("选择页面", page_options)
 
-        # 全局地区筛选 - 支持多选
+        # 全局地区筛选 - 支持多选和模糊搜索同时使用
         st.markdown("## 🌍 地区筛选")
         all_locations = get_all_locations()
         if all_locations:
-            selected_locations = st.multiselect(
-                "选择地区（可多选）",
-                options=all_locations,
-                default=[],
-                help="选择一个或多个地区来筛选数据，支持多地区同时查询"
-            )
+            # 精确匹配区域
+            with st.expander("📍 精确匹配（可多选）", expanded=True):
+                selected_locations = st.multiselect(
+                    "选择完整地区名称（可多选）",
+                    options=all_locations,
+                    default=[],
+                    help="选择一个或多个完整地区名称，支持多地区同时查询"
+                )
 
-            # 显示选中地区数量
-            if selected_locations:
-                st.info(f"📋 已选择 {len(selected_locations)} 个地区")
+                # 显示选中地区数量
+                if selected_locations:
+                    st.info(f"📋 已精确选择 {len(selected_locations)} 个地区")
+                else:
+                    st.info("📋 未精确选择地区")
+
+            # 模糊搜索区域
+            with st.expander("🔍 模糊搜索（关键词匹配）", expanded=False):
+                fuzzy_location_input = st.text_input(
+                    "输入地区关键词",
+                    placeholder="例如：北京、广东、华东、华南、东北等",
+                    help="输入地区关键词，系统会查找包含该关键词的所有地区"
+                )
+
+                if fuzzy_location_input.strip():
+                    st.info(f"🔍 将模糊搜索包含 '{fuzzy_location_input}' 的所有地区")
+                    use_fuzzy_search = True
+                else:
+                    st.info("📋 未输入模糊搜索关键词")
+                    use_fuzzy_search = False
+
+            # 综合提示
+            if selected_locations or use_fuzzy_search:
+                st.success(f"✅ 地区筛选已激活：精确匹配 {len(selected_locations)} 个地区 + 模糊搜索 {'"' + fuzzy_location_input + '"' if use_fuzzy_search else '未启用'}")
             else:
-                st.info("📋 未选择地区，显示全部数据")
+                st.info("📋 未设置地区筛选，将显示全部数据")
+
         else:
             selected_locations = []
+            use_fuzzy_search = False
+            fuzzy_location_input = ""
+            st.warning("未找到地区数据")
 
         # 数据加载按钮
         if st.button("🔄 重新加载数据"):
@@ -960,12 +1121,24 @@ def main():
         # 如果数据加载成功，显示内容
         if st.session_state.data_loaded and st.session_state.all_messages:
             if selected_page == "💼 商机匹配":
-                # 商机匹配页面
-                business_opportunity_filters(location_filter=selected_locations)
-                display_business_opportunity_dashboard(location_filter=selected_locations)
+                # 商机匹配页面 - 同时传递多选和模糊搜索参数
+                business_opportunity_filters(
+                    location_filter=selected_locations,
+                    fuzzy_location_input=fuzzy_location_input,
+                    use_fuzzy_search=use_fuzzy_search
+                )
+                display_business_opportunity_dashboard(
+                    location_filter=selected_locations,
+                    fuzzy_location_input=fuzzy_location_input,
+                    use_fuzzy_search=use_fuzzy_search
+                )
             else:
-                # 原始数据总览页面
-                sidebar_filters(location_filter=selected_locations)
+                # 原始数据总览页面 - 同时传递多选和模糊搜索参数
+                sidebar_filters(
+                    location_filter=selected_locations,
+                    fuzzy_location_input=fuzzy_location_input,
+                    use_fuzzy_search=use_fuzzy_search
+                )
                 display_data_table()
 
         else:
