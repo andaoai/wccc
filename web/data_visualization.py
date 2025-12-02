@@ -251,6 +251,92 @@ def query_certificates(target_certs, location_filter=None, fuzzy_search=False):
         st.error(f"证书查询失败: {e}")
         return []
 
+def query_receive_certificates(target_certs, location_filter=None, fuzzy_search=False):
+    """查询收类型消息中的指定证书（支持地区筛选和模糊搜索）"""
+    try:
+        # 构建动态SQL
+        certs_formatted = "', '".join(target_certs)
+
+        # 构建地区筛选条件
+        location_condition = ""
+        if location_filter and location_filter != "全部":
+            if fuzzy_search:
+                location_condition = f"AND location LIKE '%{location_filter}%'"
+            else:
+                location_condition = f"AND location = '{location_filter}'"
+
+        dynamic_sql = f"""
+        WITH target_certs AS (
+            SELECT ARRAY['{certs_formatted}']::text[] as certificates
+        ),
+        ranked_messages AS (
+            SELECT *,
+                   ROW_NUMBER() OVER (PARTITION BY original_info, member_wxid ORDER BY created_at DESC) as rn,
+                   COUNT(*) OVER (PARTITION BY original_info, member_wxid) as duplicate_count,
+                   '收' as transaction_category,
+
+                   -- 检查是否包含目标证书
+                   CASE
+                       WHEN split_certificates IS NOT NULL
+                        AND split_certificates != '{{}}'::text[]
+                        AND EXISTS (
+                            SELECT 1
+                            FROM target_certs tc,
+                                 unnest(split_certificates) sc
+                            WHERE sc = ANY(tc.certificates)
+                        )
+                       THEN true
+                       ELSE false
+                   END as contains_target_certificates,
+
+                   -- 统计包含的目标证书数量
+                   CASE
+                       WHEN split_certificates IS NOT NULL
+                        AND split_certificates != '{{}}'::text[]
+                       THEN (
+                           SELECT COUNT(*)
+                           FROM target_certs tc,
+                                unnest(split_certificates) sc
+                           WHERE sc = ANY(tc.certificates)
+                       )
+                       ELSE 0
+                   END as target_certificates_count,
+
+                   -- 列出包含的目标证书
+                   CASE
+                       WHEN split_certificates IS NOT NULL
+                        AND split_certificates != '{{}}'::text[]
+                       THEN (
+                           SELECT array_agg(DISTINCT sc ORDER BY sc)
+                           FROM target_certs tc,
+                                unnest(split_certificates) sc
+                           WHERE sc = ANY(tc.certificates)
+                       )
+                       ELSE NULL
+                   END as found_target_certificates
+
+            FROM wechat_messages
+            WHERE (type LIKE '%收%' OR type LIKE '%接%' OR type LIKE '%招聘%' OR type LIKE '%寻%')
+              {location_condition}
+        )
+        SELECT
+            *
+        FROM ranked_messages
+        WHERE rn = 1
+          AND contains_target_certificates = true
+        ORDER BY target_certificates_count DESC, created_at DESC
+        LIMIT 5000;
+        """
+
+        with db_manager.get_cursor(dict_cursor=True) as cursor:
+            cursor.execute(dynamic_sql)
+            results = cursor.fetchall()
+            return [dict(msg) for msg in results]
+
+    except Exception as e:
+        st.error(f"收类型证书查询失败: {e}")
+        return []
+
 def load_business_opportunity_data():
     """加载商机匹配数据"""
     try:
@@ -975,7 +1061,8 @@ def display_certificate_query_page():
 
     # 执行查询
     if st.button("🔍 开始查询", key="execute_query"):
-        with st.spinner("正在查询证书数据..."):
+        # 出类型查询
+        with st.spinner("正在查询出类型证书数据..."):
             # 传递地区筛选参数 - 支持精确匹配和模糊搜索同时使用
             exact_location = selected_location if selected_location != "全部" else None
 
@@ -997,18 +1084,52 @@ def display_certificate_query_page():
                 all_results = {msg['id']: msg for msg in exact_results}
                 for msg in fuzzy_results:
                     all_results[msg['id']] = msg
-                query_results = list(all_results.values())
+                send_query_results = list(all_results.values())
             else:
                 # 单一类型查询
                 location_filter = exact_location if exact_location else (fuzzy_location if use_fuzzy_search else None)
-                query_results = query_certificates(
+                send_query_results = query_certificates(
+                    target_certs,
+                    location_filter=location_filter,
+                    fuzzy_search=use_fuzzy_search
+                )
+
+        # 收类型查询
+        with st.spinner("正在查询收类型证书数据..."):
+            # 如果既有精确匹配又有模糊搜索，需要两次查询并合并结果
+            if exact_location and use_fuzzy_search:
+                # 精确匹配查询
+                receive_exact_results = query_receive_certificates(
+                    target_certs,
+                    location_filter=exact_location,
+                    fuzzy_search=False
+                )
+                # 模糊搜索查询
+                receive_fuzzy_results = query_receive_certificates(
+                    target_certs,
+                    location_filter=fuzzy_location,
+                    fuzzy_search=True
+                )
+                # 合并结果并去重（基于消息ID）
+                receive_all_results = {msg['id']: msg for msg in receive_exact_results}
+                for msg in receive_fuzzy_results:
+                    receive_all_results[msg['id']] = msg
+                receive_query_results = list(receive_all_results.values())
+            else:
+                # 单一类型查询
+                location_filter = exact_location if exact_location else (fuzzy_location if use_fuzzy_search else None)
+                receive_query_results = query_receive_certificates(
                     target_certs,
                     location_filter=location_filter,
                     fuzzy_search=use_fuzzy_search
                 )
 
         # 应用时间筛选到查询结果
-        if query_results and selected_time_filter != "全部时间":
+        def apply_time_filter(results):
+            """应用时间筛选到查询结果"""
+            if not results or selected_time_filter == "全部时间":
+                return results
+
             from datetime import datetime, timedelta
             now = datetime.now()
 
@@ -1023,7 +1144,7 @@ def display_certificate_query_page():
 
             if cutoff_date:
                 filtered_by_time = []
-                for msg in query_results:
+                for msg in results:
                     created_at = msg.get('created_at')
                     if created_at:
                         # 处理不同的时间格式
@@ -1043,13 +1164,21 @@ def display_certificate_query_page():
 
                         if created_dt >= cutoff_date:
                             filtered_by_time.append(msg)
-                query_results = filtered_by_time
+                return filtered_by_time
+            return results
 
-        if query_results:
-            df = pd.DataFrame(query_results)
+        # 应用时间筛选
+        send_query_results = apply_time_filter(send_query_results)
+        receive_query_results = apply_time_filter(receive_query_results)
+
+        # 出类型结果展示
+        if send_query_results:
+            st.success(f"📤 出类型查询结果：共找到 {len(send_query_results)} 条记录")
+
+            df = pd.DataFrame(send_query_results)
 
             # 显示查询结果统计
-            st.markdown("### 📊 查询结果统计")
+            st.markdown("### 📊 出类型统计")
 
             col1, col2, col3, col4 = st.columns(4)
 
@@ -1071,97 +1200,106 @@ def display_certificate_query_page():
                 avg_certs = float(df['target_certificates_count'].mean())
                 st.metric("平均匹配数", f"{avg_certs:.1f}")
 
-            # 分布图表
-            st.markdown("### 📈 数据分布")
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                # 目标证书数量分布
-                cert_count_dist = df['target_certificates_count'].value_counts().sort_index()
-                st.bar_chart(cert_count_dist)
-
-            with col2:
-                # 地区分布（前10）
-                if 'location' in df.columns:
-                    location_dist = df[df['location'].notna()]['location'].value_counts().head(10)
-                    if not location_dist.empty:
-                        st.bar_chart(location_dist)
-
-            # 价格统计
-            price_data = df[df['price'].notna() & (df['price'] > 0)]
-            if not price_data.empty:
-                st.markdown("### 💰 价格分析")
-
-                col1, col2, col3 = st.columns(3)
-
-                with col1:
-                    avg_price = float(price_data['price'].mean())
-                    st.metric("平均价格", f"¥{avg_price:,.0f}")
-
-                with col2:
-                    max_price = float(price_data['price'].max())
-                    st.metric("最高价格", f"¥{max_price:,.0f}")
-
-                with col3:
-                    min_price = float(price_data['price'].min())
-                    st.metric("最低价格", f"¥{min_price:,.0f}")
-
             # 详细结果表格
-            st.markdown("### 📋 查询结果详情")
+            st.markdown("### 📋 出类型查询结果详情")
 
-            # 选择显示的列
-            display_columns = [
-                'created_at', 'type', 'certificates', 'location', 'price',
-                'target_certificates_count', 'found_target_certificates',
-                'group_name', 'member_nick', 'duplicate_count'
-            ]
-
-            # 确保列存在
-            available_columns = [col for col in display_columns if col in df.columns]
-            df_display = df[available_columns].copy()
-
-            # 格式化数据
-            if 'created_at' in df_display.columns:
-                df_display['created_at'] = pd.to_datetime(df_display['created_at']).dt.strftime('%Y-%m-%d %H:%M:%S')
-
-            if 'price' in df_display.columns:
-                df_display['price'] = df_display['price'].apply(lambda x: f"¥{x:,}" if x is not None and x > 0 else "-")
-
-            if 'found_target_certificates' in df_display.columns:
-                def format_found_certs(x):
-                    if x is None or not isinstance(x, list) or not x:
-                        return "-"
-                    return ", ".join(str(cert) for cert in x)
-
-                df_display['found_target_certificates'] = df_display['found_target_certificates'].apply(format_found_certs)
-
-            # 重命名列标题
-            column_names = {
-                'created_at': '发布时间',
-                'type': '类型',
-                'certificates': '证书信息',
-                'location': '地区',
-                'price': '价格',
-                'target_certificates_count': '匹配证书数',
-                'found_target_certificates': '匹配的证书',
-                'group_name': '群组',
-                'member_nick': '发布者',
-                'duplicate_count': '重复次数'
-            }
-            df_display = df_display.rename(columns=column_names)
-
-            # 按匹配证书数量排序
-            df_display = df_display.sort_values('匹配证书数', ascending=False)
-
-            st.dataframe(
-                df_display,
-                width='stretch',
-                hide_index=True
-            )
+            display_certificate_results_table(df)
 
         else:
-            st.warning("没有找到匹配的记录")
+            st.warning("没有找到出类型匹配的记录")
+
+        # 添加分隔线
+        st.markdown("---")
+
+        # 收类型结果展示
+        if receive_query_results:
+            st.success(f"📥 收类型查询结果：共找到 {len(receive_query_results)} 条记录")
+
+            df = pd.DataFrame(receive_query_results)
+
+            # 显示查询结果统计
+            st.markdown("### 📊 收类型统计")
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric("总记录数", len(df))
+
+            with col2:
+                # 按目标证书数量统计
+                multi_cert = len(df[df['target_certificates_count'] > 1])
+                st.metric("多证书匹配", f"{multi_cert}条")
+
+            with col3:
+                # 有价格记录的数量
+                price_count = len(df[df['price'].notna() & (df['price'] > 0)])
+                st.metric("有价格记录", f"{price_count}条")
+
+            with col4:
+                # 平均目标证书数量
+                avg_certs = float(df['target_certificates_count'].mean())
+                st.metric("平均匹配数", f"{avg_certs:.1f}")
+
+            # 详细结果表格
+            st.markdown("### 📋 收类型查询结果详情")
+
+            display_certificate_results_table(df)
+
+        else:
+            st.warning("没有找到收类型匹配的记录")
+
+def display_certificate_results_table(df):
+    """显示证书查询结果表格的通用函数"""
+
+    # 选择显示的列
+    display_columns = [
+        'created_at', 'type', 'certificates', 'location', 'price',
+        'target_certificates_count', 'found_target_certificates',
+        'group_name', 'member_nick', 'duplicate_count'
+    ]
+
+    # 确保列存在
+    available_columns = [col for col in display_columns if col in df.columns]
+    df_display = df[available_columns].copy()
+
+    # 格式化数据
+    if 'created_at' in df_display.columns:
+        df_display['created_at'] = pd.to_datetime(df_display['created_at']).dt.strftime('%Y-%m-%d %H:%M:%S')
+
+    if 'price' in df_display.columns:
+        df_display['price'] = df_display['price'].apply(lambda x: f"¥{x:,}" if x is not None and x > 0 else "-")
+
+    if 'found_target_certificates' in df_display.columns:
+        def format_found_certs(x):
+            if x is None or not isinstance(x, list) or not x:
+                return "-"
+            return ", ".join(str(cert) for cert in x)
+
+        df_display['found_target_certificates'] = df_display['found_target_certificates'].apply(format_found_certs)
+
+    # 重命名列标题
+    column_names = {
+        'created_at': '发布时间',
+        'type': '类型',
+        'certificates': '证书信息',
+        'location': '地区',
+        'price': '价格',
+        'target_certificates_count': '匹配证书数',
+        'found_target_certificates': '匹配的证书',
+        'group_name': '群组',
+        'member_nick': '发布者',
+        'duplicate_count': '重复次数'
+    }
+    df_display = df_display.rename(columns=column_names)
+
+    # 按匹配证书数量排序
+    df_display = df_display.sort_values('匹配证书数', ascending=False)
+
+    st.dataframe(
+        df_display,
+        width='stretch',
+        hide_index=True
+    )
 
 def main():
     """主函数"""
