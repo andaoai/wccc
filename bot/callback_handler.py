@@ -13,7 +13,32 @@ from typing import Dict, List
 from ai.glm_agent import GLMAgent
 from db import wechat_message_dao, init_database
 from db import WeChatMessageData
+from db.raw_dao import store_raw_message_safely
+from db.raw_models import init_raw_messages_database
 from .config import MONITORED_GROUPS
+
+
+def init_callback_system():
+    """
+    初始化回调系统所需的数据库表
+    包括原始消息表和业务消息表
+    """
+    try:
+        print("🔧 初始化回调系统数据库...")
+
+        # 初始化原始消息表（用于去重）
+        init_raw_messages_database()
+        print("✅ 原始消息表初始化完成")
+
+        # 初始化业务消息表
+        init_database()
+        print("✅ 业务消息表初始化完成")
+
+        print("🎉 回调系统数据库初始化完成！")
+
+    except Exception as e:
+        print(f"❌ 回调系统数据库初始化失败: {e}")
+        raise
 
 
 def json_to_wechat_message_data_list(json_data: List[Dict], callback_data: Dict = None) -> List[WeChatMessageData]:
@@ -158,7 +183,7 @@ def load_prompt_from_file(prompt_file: str = "wechat_msg_prompt.md") -> str:
 
 def data_callback(data: Dict):
     """
-    数据回调函数示例
+    数据回调函数 - 集成原始消息去重功能
 
     Args:
         data (Dict): 回调数据，包含以下结构:
@@ -191,6 +216,16 @@ def data_callback(data: Dict):
     """
     msg = data['message']
 
+    # 第一步：存储原始消息（去重）
+    print(f"📥 存储原始消息进行去重检查: {msg['msg_id']}")
+    raw_message_id = store_raw_message_safely(data)
+
+    if raw_message_id is None:
+        print(f"🔄 消息重复或存储失败，跳过AI分析: {msg['msg_id']}")
+        return
+
+    print(f"✅ 原始消息存储成功，ID: {raw_message_id}")
+
     # 只处理群聊消息
     if msg['from_type'] != 2:  # 2表示群聊
         return
@@ -201,8 +236,8 @@ def data_callback(data: Dict):
     if msg['from_wxid'] not in MONITORED_GROUPS:
         return
 
-    # 这里可以添加数据清洗、存储等逻辑
-    print(f"开始处理消息: {data['group_info']['group_name']} - {msg['content'][:50]}...")
+    # 第二步：进行AI分析（只有去重后的新消息才会执行）
+    print(f"🤖 开始AI分析消息: {data['group_info']['group_name']} - {msg['content'][:50]}...")
     # 从文件加载建筑行业数据转换提示词
     wechat_msg_construction_prompt = load_prompt_from_file("wechat_msg_prompt.md")
     cert_split_construction_prompt = load_prompt_from_file("cert_split_prompt.md")
@@ -212,6 +247,7 @@ def data_callback(data: Dict):
     # 证书拆分 AI Agent
     cert_split_agent = GLMAgent(api_key="9ea7ae31c7864b8a9e696ecdbd062820.KBM8KO07X9dgTjRi")
     # 调用AI进行处理 - 使用系统提示词
+    print(f"📤 发送给AI的消息内容: {msg['content']}")
     response = wechat_msg_agent.chat(
         msg['content'],  # 用户消息：测试数据
         system_prompt=wechat_msg_construction_prompt,  # 系统提示词：完整的提示词
@@ -226,6 +262,11 @@ def data_callback(data: Dict):
         return
 
     print(f"✅ JSON格式验证通过，数据类型: {type(json_data)}")
+
+    # 检查AI是否返回空数组（表示没有提取到相关数据）
+    if isinstance(json_data, list) and len(json_data) == 0:
+        print(f"ℹ️ AI未检测到建筑行业相关信息，跳过处理")
+        return
 
     # 转换为dataclass对象列表，传入回调数据以包含微信元数据
     wechat_data_list = json_to_wechat_message_data_list(json_data, data)
