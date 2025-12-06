@@ -1,0 +1,36 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model WechatMessage {
+  id                   Int       @id @default(autoincrement())
+  type                 String    @default("")
+  certificates         String    @default("")
+  socialSecurity       String?   @map("social_security")
+  location             String?
+  price                Int?
+  otherInfo            String?   @map("other_info")
+  originalInfo         String    @default("") @map("original_info")
+  splitCertificates    String[]  @map("split_certificates")
+  groupName            String    @default("") @map("group_name")
+  memberNick           String    @default("") @map("member_nick")
+  groupWxid            String    @default("") @map("group_wxid")
+  memberWxid           String    @default("") @map("member_wxid")
+  msgId                String    @default("") @map("msg_id")
+  timestamp            DateTime?
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@map("wechat_messages")
+}
